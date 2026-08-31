@@ -107,6 +107,10 @@ core.mkLib {
   modules = composedLib: { };         # class-keyed local registrations
   libOverlays = mkLibOverlay: { };    # named overlay registrations
   libOverlayImports = builtins.attrValues;  # selection for this library
+  ecosystems = { };                   # declared ecosystem sources, by
+                                      # exact name; captured into the
+                                      # manifest, interpreted by
+                                      # higher layers
 }
 ```
 
@@ -114,7 +118,7 @@ The composed library carries, under `caisson-core`: `mkLib` (with
 `baseLib` defaulting to this composition's base), `mkLibOverlay`,
 `mkModule` (class-parameterized), the class-keyed `modules` registry,
 the `manifest` (the capture of what `mkLib` consumed: `inputs`,
-`modules`, `libOverlays`), plus `compose`, `resolve`, `importApply`,
+`modules`, `libOverlays`, `ecosystems`), plus `compose`, `resolve`, `importApply`,
 `callConsumerFlake`, and `partitionExtraInputs`. Overlays contribute
 modules through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over

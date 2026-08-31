@@ -383,6 +383,22 @@ let
         rawModules = resolvedArgs.modules or (composedLib: { });
         rawLibOverlays = resolvedArgs.libOverlays or (mkLibOverlay: { });
         libOverlayImports = resolvedArgs.libOverlayImports or (overlays: builtins.attrValues overlays);
+        rawEcosystems = resolvedArgs.ecosystems or { };
+
+        # Declared ecosystem sources: mkLib-time facts, captured in the
+        # manifest for the layered resolution higher layers perform
+        # (explicit argument, then these declarations, then an input
+        # with exactly the declared name). Nothing here interprets
+        # them.
+        ecosystems =
+          if builtins.isAttrs rawEcosystems then
+            rawEcosystems
+          else
+            throw ''
+              mkLib expects `ecosystems` to be an attribute set of ecosystem
+              sources keyed by their exact names (e.g. `{ nixpkgs = ...; }`),
+              but got a ${builtins.typeOf rawEcosystems}.
+            '';
 
         modules =
           if builtins.isFunction rawModules then
@@ -442,7 +458,12 @@ let
           overlay = _final: prev: {
             caisson-core = (prev.caisson-core or { }) // {
               manifest = {
-                inherit inputs modules libOverlays;
+                inherit
+                  ecosystems
+                  inputs
+                  libOverlays
+                  modules
+                  ;
               };
             };
           };
@@ -463,7 +484,9 @@ let
       # forced first. `||` only forces the throw-carrying binding in
       # the non-function case.
       builtins.seq (builtins.isFunction rawModules || modules) (
-        builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) finalLib
+        builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
+          builtins.seq (builtins.isAttrs rawEcosystems || ecosystems) finalLib
+        )
       )
     );
 

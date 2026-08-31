@@ -355,10 +355,37 @@ let
         };
         manifest = composed.caisson-core.manifest;
       in
-      manifest.inputs == theInputs
+      builtins.attrNames manifest == [
+        "ecosystems"
+        "inputs"
+        "libOverlays"
+        "modules"
+      ]
+      && manifest.inputs == theInputs
+      && manifest.ecosystems == { }
       && builtins.attrNames manifest.libOverlays == [ "a" ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
+
+    lifecycleEcosystemDeclarationsJoinTheManifest =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          ecosystems = {
+            nixpkgs = "/probe-nixpkgs";
+          };
+        };
+      in
+      composed.caisson-core.manifest.ecosystems.nixpkgs == "/probe-nixpkgs";
+
+    lifecycleEcosystemsMustBeAnAttrset = throws (
+      core.mkLib {
+        inputs = { };
+        baseLib = { };
+        ecosystems = 42;
+      }
+    );
 
     lifecycleInjectedMkLibDefaultsToCompositionBase =
       let
