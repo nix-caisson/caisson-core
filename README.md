@@ -1,6 +1,6 @@
 # caisson-core
 
-A minimal engine for composing library overlays: identity,
+caisson-core composes library overlays: identity,
 replacement, and deterministic order, implemented over plain Nix
 builtins.
 
@@ -70,7 +70,7 @@ in
   fixpoint. One law follows from the fixpoint itself: an overlay's
   output attribute *names* must not depend on `final`.
 - `compose` also returns `meta` (key order, winning entries, tail
-  length) so tooling can inspect and lint a composition; the engine
+  length) so tooling can inspect and lint a composition; `compose`
   itself does not warn, because linting belongs to that tooling.
 
 ## Ecosystem-source resolution
@@ -130,7 +130,7 @@ on the export side.
 
 ## The kernel
 
-Two self-contained companions ship alongside the engine:
+Two self-contained companions ship alongside `compose`:
 
 - `callFlake { src, inputs, sourceInfo ? { } }` applies a flake's
   outputs function to explicitly provided, already-wired inputs. No

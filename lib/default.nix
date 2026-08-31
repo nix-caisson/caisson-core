@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 #
-# caisson-core: a minimal engine for composing library overlays.
+# caisson-core: composes library overlays with identity, replacement,
+# and deterministic order.
 #
 # An entry is an attribute set:
 #
@@ -153,7 +154,7 @@ let
   partitionExtraInputs = import ./kernel/partition-extra-inputs.nix;
 
   # The library lifecycle: mkLib and the registration machinery, built
-  # on the engine above.  See its header for the contracts.
+  # on `compose` above.  See its header for the contracts.
   lifecycle = import ./lifecycle.nix {
     inherit
       callFlake

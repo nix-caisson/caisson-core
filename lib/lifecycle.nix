@@ -4,10 +4,10 @@
 # library plus registered overlays and modules, and injecting the
 # `caisson-core` namespace (machinery, registry, manifest) into the
 # result.  mkLib is the entry point; mkCoreOverlay is the same
-# injection as a standalone engine entry for compositions assembled
+# injection as a standalone entry for compositions assembled
 # with `compose` directly.
 #
-# Contracts, shared with the engine:
+# Contracts, shared with `compose`:
 #
 #   - The base is contributed as an opaque attribute set.  Overriding
 #     one of its attributes does not re-tie its internal references.
@@ -35,7 +35,7 @@ let
   # Use a list of built overlays (`{ imports, overlay }` attrsets,
   # imports applied before the overlay itself) to extend a base
   # library.  The chain is flattened depth-first, imports before self,
-  # duplicates preserved, and applied as anonymous engine entries
+  # duplicates preserved, and applied as anonymous entries
   # over the base, which reproduces the historical fold order exactly.
   mkExtendedLib =
     let
@@ -312,7 +312,7 @@ let
 
   # The `caisson-core` namespace injection as a built overlay: the
   # machinery bound to one composition.  mkLib applies it first; a
-  # engine consumer composing entries directly can apply it as (part
+  # consumer composing entries directly can apply it as (part
   # of) a keyed entry.  The registry seed preserves anything already
   # contributed; local registrations win because mkLib applies them
   # after every imported overlay.

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 {
 
-  description = "A minimal engine for composing library overlays: identity, replacement, and deterministic order over plain builtins";
+  description = "Library overlay composition with identity, replacement, and deterministic order, over plain builtins";
 
   outputs =
     { self }:
