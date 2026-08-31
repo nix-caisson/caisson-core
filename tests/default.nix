@@ -157,6 +157,24 @@ let
 
     resolveMissIsNull = resolve { name = "nixpkgs-lib"; } == null;
 
+    callFlakeWiresInputsAndSelf =
+      let
+        wired = core.callFlake {
+          src = ./fixtures/hello-flake;
+          inputs.greeting = { text = "hello"; };
+          sourceInfo.rev = "fixture";
+        };
+      in
+      wired.message == "hello, kernel"
+      && wired.viaSelf == "hello, kernel"
+      && wired.selfPath == ./fixtures/hello-flake
+      && wired.rev == "fixture"
+      && wired._type == "flake"
+      && wired.inputs.greeting.text == "hello";
+
+    partitionExtraInputsLoadsLockedSubflake =
+      core.partitionExtraInputs ./fixtures/deps-flake == { };
+
   };
 
   failures = builtins.filter (n: results.${n} != true) (builtins.attrNames results);

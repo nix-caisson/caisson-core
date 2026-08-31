@@ -92,6 +92,21 @@ with exactly the declared name. A full miss returns `null`; `resolve`
 never throws and never formats an error message. Interpreting a miss
 is deliberately left to the calling layer.
 
+## The kernel
+
+Two self-contained companions ship alongside the calculus:
+
+- `callFlake { src, inputs, sourceInfo ? { } }` applies a flake's
+  outputs function to explicitly provided, already-wired inputs. No
+  lock handling and no fetching; every input is a constructed flake
+  or a plain source path.
+- `partitionExtraInputs <dir>` loads a lockfile'd subflake directory
+  and returns its inputs, safely under read-only evaluation (via the
+  patched copy of flake-compat in [vendor/](vendor/flake-compat)).
+
+Both keep the builtins-only rule; the vendored flake-compat carries
+its own license and provenance header.
+
 ## Tests
 
 The test suite is hermetic pure evaluation:

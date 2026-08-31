@@ -147,7 +147,19 @@ let
     else
       null;
 
+  # The kernel: minimal flake-output wiring over explicitly provided,
+  # already-wired inputs (no lock handling, no fetching), and the
+  # read-only-eval-safe partition extra-inputs loader.  Both files are
+  # self-contained on purpose; see their headers.
+  callFlake = import ./kernel/call-flake.nix;
+  partitionExtraInputs = import ./kernel/partition-extra-inputs.nix;
+
 in
 {
-  inherit compose resolve;
+  inherit
+    callFlake
+    compose
+    partitionExtraInputs
+    resolve
+    ;
 }
