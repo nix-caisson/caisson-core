@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Minimal reimplementation of flake output wiring: applies a flake's
 # outputs function to explicitly provided, already-wired inputs. No lock
-# handling and no fetching — every input must be a fully constructed
+# handling and no fetching: every input must be a fully constructed
 # flake (itself built with this function) or a plain source path for
 # non-flake inputs. The shared kernel under callConsumerFlake and the
 # eval-weight harness. This file must stay self-contained: eval-weight

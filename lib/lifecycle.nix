@@ -73,7 +73,7 @@ let
   # takes the closure attrset, `{ closure-inputs, mkLibOverlay, ... }:`,
   # as its first arg list, and returns an `{ imports ? [ ], overlay }`
   # attrset.  Already-built overlays (e.g. another flake's exported
-  # libOverlays) are registered directly, never wrapped.
+  # libOverlays) are registered directly rather than wrapped.
   mkLibOverlayFor =
     {
       inputs,

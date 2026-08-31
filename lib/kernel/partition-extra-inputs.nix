@@ -7,7 +7,7 @@
 #
 # `extraInputsFlake` routes the same path through flake-parts' vendored
 # flake-compat, which imports the subflake's flake.nix through a coerced
-# store-path string — a store object the evaluation itself must create, which
+# store-path string, a store object the evaluation itself must create, which
 # `nix flake check --no-build` (read-only eval store) cannot, failing
 # with "path '…' is not valid" unless the object was pre-materialized. Our
 # vendored copy imports via the original path value instead (see
@@ -15,7 +15,7 @@
 #
 # COVERAGE CONSTRAINT: the vendored fix patches the ROOT import only. The
 # extra-inputs flake's lock must hold only remote (github/git/tarball…)
-# inputs — a RELATIVE PATH input (`path:./sub`) is imported through the
+# inputs: a RELATIVE PATH input (`path:./sub`) is imported through the
 # root's coerced copy and resurrects the read-only failure (verified).
 # Locked remote inputs are fine: fetchTree materializes them even under
 # --no-build. Keep tests/dependencies-style flakes free of relative path
