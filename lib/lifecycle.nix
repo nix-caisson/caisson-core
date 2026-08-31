@@ -384,6 +384,54 @@ let
         rawLibOverlays = resolvedArgs.libOverlays or (mkLibOverlay: { });
         libOverlayImports = resolvedArgs.libOverlayImports or (overlays: builtins.attrValues overlays);
         rawEcosystems = resolvedArgs.ecosystems or { };
+        rawProjects = resolvedArgs.projects or { };
+
+        # Consumed projects: whole upstream contributions, registered
+        # as units.  A project value is assumed to carry `libOverlays`
+        # and class-keyed `modules` dictionaries, which a caisson-built
+        # flake's outputs already do; the shape is assumed rather than
+        # checked (producers validate their own exports).  The
+        # project's overlays join the registered dictionary and its
+        # modules join the registry under `<project>/<name>`, so the
+        # existing selections keep per-item choice: libOverlayImports
+        # decides which overlays apply here, and the class registry's
+        # selection at each use site decides which modules load.
+        projects =
+          if builtins.isAttrs rawProjects then
+            rawProjects
+          else
+            throw ''
+              mkLib expects `projects` to be an attribute set of consumed
+              project contributions keyed by project name (e.g.
+              `{ my-dep = inputs.my-dep; }`), but got a ${builtins.typeOf rawProjects}.
+            '';
+
+        prefixNames =
+          projectName: attrs:
+          builtins.listToAttrs (
+            builtins.map (n: {
+              name = "${projectName}/${n}";
+              value = attrs.${n};
+            }) (builtins.attrNames attrs)
+          );
+
+        projectLibOverlays = builtins.foldl' (
+          acc: projectName: acc // prefixNames projectName (projects.${projectName}.libOverlays or { })
+        ) { } (builtins.attrNames projects);
+
+        projectModules = builtins.foldl' (
+          acc: projectName:
+          let
+            classed = projects.${projectName}.modules or { };
+          in
+          acc
+          // builtins.listToAttrs (
+            builtins.map (class: {
+              name = class;
+              value = (acc.${class} or { }) // prefixNames projectName classed.${class};
+            }) (builtins.attrNames classed)
+          )
+        ) { } (builtins.attrNames projects);
 
         # Declared ecosystem sources: mkLib-time facts, captured in the
         # manifest for the layered resolution higher layers perform
@@ -431,12 +479,24 @@ let
           };
         };
 
-        importedLibOverlays = libOverlayImports libOverlays;
+        # The selection sees consumed projects' overlays beside the
+        # local registrations, prefixed names beside short ones; a
+        # local registration wins a name collision.
+        registeredLibOverlays = projectLibOverlays // libOverlays;
+        importedLibOverlays = libOverlayImports registeredLibOverlays;
 
         coreOverlay = mkCoreOverlay {
           inherit inputs;
           selfModules = modules;
           defaultBaseLib = baseLib;
+        };
+
+        # Consumed projects' modules enter the registry like overlay
+        # contributions: available to every selection, beaten by a
+        # same-named local registration.
+        projectModulesOverlay = {
+          imports = [ ];
+          overlay = _final: prev: contributeModules prev projectModules;
         };
 
         # The composing flake's own registrations apply last, so a
@@ -463,6 +523,7 @@ let
                   inputs
                   libOverlays
                   modules
+                  projects
                   ;
               };
             };
@@ -473,6 +534,7 @@ let
           [ coreOverlay ]
           ++ importedLibOverlays
           ++ [
+            projectModulesOverlay
             localModulesOverlay
             manifestOverlay
           ]
@@ -485,7 +547,9 @@ let
       # the non-function case.
       builtins.seq (builtins.isFunction rawModules || modules) (
         builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
-          builtins.seq (builtins.isAttrs rawEcosystems || ecosystems) finalLib
+          builtins.seq (builtins.isAttrs rawEcosystems || ecosystems) (
+            builtins.seq (builtins.isAttrs rawProjects || projects) finalLib
+          )
         )
       )
     );

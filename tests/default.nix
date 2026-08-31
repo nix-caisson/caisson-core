@@ -360,6 +360,7 @@ let
         "inputs"
         "libOverlays"
         "modules"
+        "projects"
       ]
       && manifest.inputs == theInputs
       && manifest.ecosystems == { }
@@ -404,6 +405,87 @@ let
         applied = core.importApply ({ n }: { config.value = n; }) { n = 7; };
       in
       applied.config.value == 7;
+
+    lifecycleProjectsRegisterAsUnits =
+      let
+        dep = {
+          libOverlays.greeter = {
+            imports = [ ];
+            overlay = _final: _prev: {
+              greet = name: "hello, ${name}";
+            };
+          };
+          modules.nixos.service = {
+            config.origin = "dep";
+          };
+        };
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          projects = {
+            inherit dep;
+          };
+        };
+      in
+      composed.greet "world" == "hello, world"
+      && composed.caisson-core.modules.nixos."dep/service".config.origin == "dep"
+      && builtins.attrNames composed.caisson-core.manifest.projects == [ "dep" ];
+
+    lifecycleProjectOverlaysObeySelection =
+      let
+        dep = {
+          libOverlays.marker = {
+            imports = [ ];
+            overlay = _final: _prev: {
+              fromDep = true;
+            };
+          };
+        };
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          projects = {
+            inherit dep;
+          };
+          libOverlays = mkLibOverlay: {
+            local = mkLibOverlay ({ ... }: { overlay = _final: _prev: { fromLocal = true; }; });
+          };
+          # Per-item choice over the combined dictionary: prefixed
+          # project names beside local short names.
+          libOverlayImports = overlays: [ overlays.local ];
+        };
+      in
+      composed.fromLocal && !(composed ? fromDep);
+
+    lifecycleLocalModulesBeatProjectModules =
+      let
+        dep = {
+          modules.nixos.service = {
+            config.origin = "project";
+          };
+        };
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          projects = {
+            inherit dep;
+          };
+          modules = composedLib: {
+            nixos."dep/service" = composedLib.caisson-core.mkModule "nixos" (
+              { ... }: { config.origin = "local"; }
+            );
+          };
+        };
+      in
+      composed.caisson-core.modules.nixos."dep/service".config.origin == "local";
+
+    lifecycleProjectsMustBeAnAttrset = throws (
+      core.mkLib {
+        inputs = { };
+        baseLib = { };
+        projects = 42;
+      }
+    );
 
     lifecycleCoreOverlayComposesAsEntry =
       let
