@@ -10,7 +10,7 @@
 # it: closed by its reporter as their own IFD). Upstream (checked
 # 2026-07-14, identical on flake-parts main) imports through the coerced
 # store-path string, which requires a store write the read-only eval
-# cannot perform. Serves lib.caisson.partitionExtraInputs; drop this
+# cannot perform. Serves the partitionExtraInputs kernel; drop this
 # vendor copy if Nix materializes eval-needed paths under --no-build or
 # flake-parts fixes the read-back upstream.
 #

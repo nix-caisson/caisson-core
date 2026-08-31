@@ -26,5 +26,5 @@ src:
   inherit src;
   # Mirrors flake-parts extras/partitions.nix `get-flake`: partition input
   # loading is pure; nothing may consult the eval system.
-  system = throw "caisson.partitionExtraInputs: pure flake-compat use; no system available";
+  system = throw "caisson-core.partitionExtraInputs: pure flake-compat use; no system available";
 }).outputs.inputs

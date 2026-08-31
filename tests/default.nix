@@ -29,7 +29,12 @@ let
       let
         a = entry "test.a" [ ] (_final: _prev: { x = 1; });
         b = entry "test.b" [ ] (_final: _prev: { y = 2; });
-        r = compose { entries = [ a b ]; };
+        r = compose {
+          entries = [
+            a
+            b
+          ];
+        };
       in
       r.lib.x == 1 && r.lib.y == 2;
 
@@ -37,7 +42,12 @@ let
       let
         a = entry "test.a" [ ] (_final: _prev: { x = 1; });
         b = entry "test.b" [ ] (final: _prev: { y = final.x + 1; });
-        r = compose { entries = [ b a ]; };
+        r = compose {
+          entries = [
+            b
+            a
+          ];
+        };
       in
       r.lib.y == 2;
 
@@ -45,7 +55,12 @@ let
       let
         a = entry "test.a" [ base ] (_final: _prev: { x = 1; });
         b = entry "test.b" [ base ] (_final: _prev: { y = 2; });
-        r = compose { entries = [ a b ]; };
+        r = compose {
+          entries = [
+            a
+            b
+          ];
+        };
       in
       r.lib.applications == 1;
 
@@ -54,9 +69,20 @@ let
         v1 = entry "test.k" [ ] (_final: _prev: { v = 1; });
         other = entry "test.other" [ ] (_final: _prev: { o = true; });
         v2 = entry "test.k" [ ] (_final: _prev: { v = 2; });
-        r = compose { entries = [ v1 other v2 ]; };
+        r = compose {
+          entries = [
+            v1
+            other
+            v2
+          ];
+        };
       in
-      r.lib.v == 2 && r.meta.order == [ "test.k" "test.other" ];
+      r.lib.v == 2
+      &&
+        r.meta.order == [
+          "test.k"
+          "test.other"
+        ];
 
     polyfillSeesTargetAndWins =
       let
@@ -69,12 +95,34 @@ let
 
     replacementInheritsSlot =
       let
-        k1 = entry "test.k" [ ] (_final: prev: { sawN = prev ? n; v = 1; });
+        k1 = entry "test.k" [ ] (
+          _final: prev: {
+            sawN = prev ? n;
+            v = 1;
+          }
+        );
         n = entry "test.n" [ ] (_final: _prev: { n = true; });
-        k2 = entry "test.k" [ n ] (_final: prev: { sawN = prev ? n; v = 2; });
-        r = compose { entries = [ k1 k2 ]; };
+        k2 = entry "test.k" [ n ] (
+          _final: prev: {
+            sawN = prev ? n;
+            v = 2;
+          }
+        );
+        r = compose {
+          entries = [
+            k1
+            k2
+          ];
+        };
       in
-      r.lib.v == 2 && r.lib.n && !r.lib.sawN && r.meta.order == [ "test.k" "test.n" ];
+      r.lib.v == 2
+      && r.lib.n
+      && !r.lib.sawN
+      &&
+        r.meta.order == [
+          "test.k"
+          "test.n"
+        ];
 
     cycleTerminatesDeterministically =
       let
@@ -82,7 +130,13 @@ let
         b = entry "test.cb" [ a ] (_final: _prev: { cb = true; });
         r = compose { entries = [ a ]; };
       in
-      r.lib.ca && r.lib.cb && r.meta.order == [ "test.cb" "test.ca" ];
+      r.lib.ca
+      && r.lib.cb
+      &&
+        r.meta.order == [
+          "test.cb"
+          "test.ca"
+        ];
 
     keylessAppliesAfterKeyedWorld =
       let
@@ -92,7 +146,12 @@ let
           imports = [ ];
           overlay = _final: prev: { anonSawKeyed = prev ? fromKeyed; };
         };
-        r = compose { entries = [ anon keyed ]; };
+        r = compose {
+          entries = [
+            anon
+            keyed
+          ];
+        };
       in
       r.lib.anonSawKeyed && r.meta.tailLength == 1;
 
@@ -103,7 +162,12 @@ let
           imports = [ ];
           overlay = _final: prev: { count = (prev.count or 0) + 1; };
         };
-        r = compose { entries = [ anon anon ]; };
+        r = compose {
+          entries = [
+            anon
+            anon
+          ];
+        };
       in
       r.lib.count == 2 && r.meta.tailLength == 2;
 
@@ -161,7 +225,9 @@ let
       let
         wired = core.callFlake {
           src = ./fixtures/hello-flake;
-          inputs.greeting = { text = "hello"; };
+          inputs.greeting = {
+            text = "hello";
+          };
           sourceInfo.rev = "fixture";
         };
       in
@@ -172,8 +238,160 @@ let
       && wired._type == "flake"
       && wired.inputs.greeting.text == "hello";
 
-    partitionExtraInputsLoadsLockedSubflake =
-      core.partitionExtraInputs ./fixtures/deps-flake == { };
+    partitionExtraInputsLoadsLockedSubflake = core.partitionExtraInputs ./fixtures/deps-flake == { };
+
+    # Lifecycle: mkLib and the registration machinery.
+
+    lifecycleMkLibRequiresBaseLib = throws (core.mkLib { inputs = { }; });
+
+    lifecycleComposesOverlays =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = {
+            marker = 1;
+          };
+          libOverlays = mkLibOverlay: {
+            a = mkLibOverlay (
+              { ... }:
+              {
+                overlay = _final: prev: { x = prev.marker + 1; };
+              }
+            );
+          };
+        };
+      in
+      composed.marker == 1 && composed.x == 2;
+
+    lifecycleOverlayClosureCarriesInputs =
+      let
+        composed = core.mkLib {
+          inputs = {
+            probe = 42;
+          };
+          baseLib = { };
+          libOverlays = mkLibOverlay: {
+            a = mkLibOverlay (
+              { closure-inputs, ... }:
+              {
+                overlay = _final: _prev: { seen = closure-inputs.probe; };
+              }
+            );
+          };
+        };
+      in
+      composed.seen == 42;
+
+    lifecycleInjectsMachinery =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+        };
+      in
+      builtins.isFunction composed.caisson-core.mkLib
+      && builtins.isFunction composed.caisson-core.mkLibOverlay
+      && builtins.isFunction (composed.caisson-core.mkModule "nixos")
+      && builtins.isFunction composed.caisson-core.importApply
+      && builtins.isFunction composed.caisson-core.compose
+      && builtins.isFunction composed.caisson-core.resolve
+      && builtins.isFunction composed.caisson-core.callConsumerFlake
+      && builtins.isFunction composed.caisson-core.partitionExtraInputs
+      && composed.caisson-core.modules == { };
+
+    lifecycleLocalModulesRegister =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          modules = composedLib: {
+            nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
+          };
+        };
+      in
+      composed.caisson-core.modules.nixos.local.config.origin == "local";
+
+    lifecycleOverlayContributionsMergeAndLocalsWin =
+      let
+        contributor =
+          { mkModule, contributeModules, ... }:
+          {
+            overlay =
+              _final: prev:
+              contributeModules prev {
+                nixos = {
+                  "other/contributed" = mkModule "nixos" ({ ... }: { config.origin = "contributed"; });
+                  shared = mkModule "nixos" ({ ... }: { config.origin = "contributed"; });
+                };
+              };
+          };
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          modules = composedLib: {
+            nixos.shared = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
+          };
+          libOverlays = mkLibOverlay: { c = mkLibOverlay contributor; };
+        };
+        registry = composed.caisson-core.modules.nixos;
+      in
+      registry."other/contributed".config.origin == "contributed"
+      && registry.shared.config.origin == "local";
+
+    lifecycleManifestCapturesMkLibFacts =
+      let
+        theInputs = {
+          probe = true;
+        };
+        composed = core.mkLib {
+          inputs = theInputs;
+          baseLib = { };
+          modules = composedLib: {
+            nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
+          };
+          libOverlays = mkLibOverlay: {
+            a = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
+          };
+        };
+        manifest = composed.caisson-core.manifest;
+      in
+      manifest.inputs == theInputs
+      && builtins.attrNames manifest.libOverlays == [ "a" ]
+      && builtins.attrNames manifest.modules == [ "nixos" ]
+      && manifest.modules.nixos.local.config.origin == "local";
+
+    lifecycleInjectedMkLibDefaultsToCompositionBase =
+      let
+        outer = core.mkLib {
+          inputs = { };
+          baseLib = {
+            marker = "outer-base";
+          };
+        };
+        inner = outer.caisson-core.mkLib { inputs = { }; };
+      in
+      inner.marker == "outer-base";
+
+    lifecycleImportApplyThreadsStaticArgs =
+      let
+        applied = core.importApply ({ n }: { config.value = n; }) { n = 7; };
+      in
+      applied.config.value == 7;
+
+    lifecycleCoreOverlayComposesAsEntry =
+      let
+        machinery = core.mkCoreOverlay { inputs = { }; };
+        r = compose {
+          entries = [
+            {
+              key = "test.machinery";
+              imports = [ ];
+              overlay = machinery.overlay;
+            }
+          ];
+        };
+      in
+      builtins.isFunction r.lib.caisson-core.mkLibOverlay && r.lib.caisson-core.modules == { };
 
   };
 

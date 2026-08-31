@@ -92,6 +92,38 @@ with exactly the declared name. A full miss returns `null`; `resolve`
 never throws and never formats an error message. Interpreting a miss
 is deliberately left to the calling layer.
 
+## The library lifecycle
+
+`mkLib` builds a composed library from a base library plus registered
+overlays and modules, and injects the `caisson-core` namespace
+(machinery, module registry, manifest) into the result:
+
+```nix
+core.mkLib {
+  inputs = inputs;        # the composing flake's inputs, closed over
+                          # by registered overlays and modules
+  baseLib = baseLib;      # the base library, as a plain argument;
+                          # nothing is looked up by input name
+  modules = composedLib: { };         # class-keyed local registrations
+  libOverlays = mkLibOverlay: { };    # named overlay registrations
+  libOverlayImports = builtins.attrValues;  # selection for this library
+}
+```
+
+The composed library carries, under `caisson-core`: `mkLib` (with
+`baseLib` defaulting to this composition's base), `mkLibOverlay`,
+`mkModule` (class-parameterized), the class-keyed `modules` registry,
+the `manifest` (the capture of what `mkLib` consumed: `inputs`,
+`modules`, `libOverlays`), plus `compose`, `resolve`, `importApply`,
+`callConsumerFlake`, and `partitionExtraInputs`. Overlays contribute
+modules through their closure (`mkModule`, `contributeModules`); the
+composing flake's local registrations apply last and win over
+same-named contributions. `mkCoreOverlay` exposes the same namespace
+injection as a built overlay for compositions assembled with
+`compose` directly. The manifest carries no checks here: producers
+validate their own manifests, and consuming integrations type-check
+on the export side.
+
 ## The kernel
 
 Two self-contained companions ship alongside the calculus:

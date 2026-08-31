@@ -81,12 +81,11 @@ let
         else
           afterImports
           // {
-            winners = afterImports.winners // { ${k} = e; };
+            winners = afterImports.winners // {
+              ${k} = e;
+            };
             order =
-              if builtins.hasAttr k afterImports.winners then
-                afterImports.order
-              else
-                afterImports.order ++ [ k ];
+              if builtins.hasAttr k afterImports.winners then afterImports.order else afterImports.order ++ [ k ];
           };
     in
     builtins.foldl' (s: e: goEntry s [ ] e) {
@@ -109,8 +108,7 @@ let
     in
     prev // overlay final prev;
 
-  applyEntries =
-    entryList: fix (builtins.foldl' (f: e: extends e.overlay f) (_final: { }) entryList);
+  applyEntries = entryList: fix (builtins.foldl' (f: e: extends e.overlay f) (_final: { }) entryList);
 
   compose =
     { entries }:
@@ -154,6 +152,17 @@ let
   callFlake = import ./kernel/call-flake.nix;
   partitionExtraInputs = import ./kernel/partition-extra-inputs.nix;
 
+  # The library lifecycle: mkLib and the registration machinery, built
+  # on the calculus above.  See its header for the contracts.
+  lifecycle = import ./lifecycle.nix {
+    inherit
+      callFlake
+      compose
+      partitionExtraInputs
+      resolve
+      ;
+  };
+
 in
 {
   inherit
@@ -161,5 +170,13 @@ in
     compose
     partitionExtraInputs
     resolve
+    ;
+  inherit (lifecycle)
+    callConsumerFlake
+    contributeModules
+    importApply
+    mkCoreOverlay
+    mkExtendedLib
+    mkLib
     ;
 }
