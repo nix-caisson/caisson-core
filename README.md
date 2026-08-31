@@ -1,6 +1,6 @@
 # caisson-core
 
-A minimal calculus for composing library overlays: identity,
+A minimal engine for composing library overlays: identity,
 replacement, and deterministic order, implemented over plain Nix
 builtins.
 
@@ -130,7 +130,7 @@ on the export side.
 
 ## The kernel
 
-Two self-contained companions ship alongside the calculus:
+Two self-contained companions ship alongside the engine:
 
 - `callFlake { src, inputs, sourceInfo ? { } }` applies a flake's
   outputs function to explicitly provided, already-wired inputs. No
