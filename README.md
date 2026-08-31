@@ -71,7 +71,7 @@ in
   output attribute *names* must not depend on `final`.
 - `compose` also returns `meta` (key order, winning entries, tail
   length) so tooling can inspect and lint a composition; the engine
-  itself never warns.
+  itself does not warn, because linting belongs to that tooling.
 
 ## Ecosystem-source resolution
 
@@ -89,8 +89,8 @@ core.resolve {
 
 Priority is explicit argument, then declared default, then an input
 with exactly the declared name. A full miss returns `null`; `resolve`
-never throws and never formats an error message. Interpreting a miss
-is deliberately left to the calling layer.
+can never throw or format an error message, because interpreting a
+miss is deliberately the calling layer's job.
 
 ## The library lifecycle
 

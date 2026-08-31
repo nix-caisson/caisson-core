@@ -124,9 +124,9 @@ let
       };
     };
 
-  # Layered ecosystem-source resolution.  Never throws and never
-  # formats a message: a full miss is the interpretable value null,
-  # left to the caller to interpret.  Priority: the explicit argument,
+  # Layered ecosystem-source resolution.  It can never throw or
+  # format a message, because a full miss is the interpretable value
+  # null, left to the caller to interpret.  Priority: the explicit argument,
   # then the client's declared defaults, then an input with exactly
   # the declared name.
   resolve =

@@ -346,8 +346,8 @@ let
           };
           mkLibOverlay = mkLibOverlayFor {
             inherit inputs;
-            # Lazily bound: overlay files that never contribute
-            # modules never force the composed fixpoint through
+            # Lazily bound, so overlay files that contribute no
+            # modules do not force the composed fixpoint through
             # these.
             extraOverlayClosure = {
               mkModule = final.caisson-core.mkModule;
