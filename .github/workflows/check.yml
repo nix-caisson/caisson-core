@@ -9,5 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v16
+      - name: builtins-only lint
+        run: |
+          if grep -RnE '(^|[^a-zA-Z_.])(lib|pkgs)[.]' lib; then
+            echo "lib/ may reference nothing but builtins" >&2
+            exit 1
+          fi
       - run: nix flake check -L
       - run: nix eval -f tests summary
