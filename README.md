@@ -111,22 +111,38 @@ core.mkLib {
                                       # exact name; captured into the
                                       # manifest, interpreted by
                                       # higher layers
+  projects = { };                     # consumed upstream contributions,
+                                      # by project name
 }
 ```
 
 The composed library carries, under `caisson-core`: `mkLib` (with
 `baseLib` defaulting to this composition's base), `mkLibOverlay`,
 `mkModule` (class-parameterized), the class-keyed `modules` registry,
-the `manifest` (the capture of what `mkLib` consumed: `inputs`,
-`modules`, `libOverlays`, `ecosystems`), plus `compose`, `resolve`, `importApply`,
+the `manifest`, plus `compose`, `resolve`, `importApply`,
 `callConsumerFlake`, and `partitionExtraInputs`. Overlays contribute
 modules through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
 same-named contributions. `mkCoreOverlay` exposes the same namespace
 injection as a built overlay for compositions assembled with
-`compose` directly. The manifest carries no checks here: producers
-validate their own manifests, and consuming integrations type-check
-on the export side.
+`compose` directly.
+
+A `projects` value is an attrset with `libOverlays` and class-keyed
+`modules` dictionaries, the outputs a flake built on this machinery
+already publishes. Its entries join the registered dictionaries under
+`<project>/<name>`, so the existing selections keep per-item choice
+and a local registration wins a name collision.
+
+The manifest is the composition's self-description, recorded at
+`caisson-core.manifest`: `inputs`, `ecosystems`, the raw `projects`
+capture, and the registered `libOverlays` and `modules` dictionaries
+(project entries prefixed, locals winning). It is not passed
+anywhere; readers pull it back out of the composed library. Higher
+layers project a flake's `libOverlays` and `modules` outputs from it,
+and the `projects` argument consumes those projections one level
+down, which is how dictionaries populate across flakes. The manifest
+carries no checks here: producers validate their own manifests, and
+consuming integrations type-check on the export side.
 
 ## The kernel
 

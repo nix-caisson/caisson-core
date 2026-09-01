@@ -429,7 +429,11 @@ let
       in
       composed.greet "world" == "hello, world"
       && composed.caisson-core.modules.nixos."dep/service".config.origin == "dep"
-      && builtins.attrNames composed.caisson-core.manifest.projects == [ "dep" ];
+      && builtins.attrNames composed.caisson-core.manifest.projects == [ "dep" ]
+      # The manifest dictionaries carry the registered union, so the
+      # export side sees project entries like hand-registered ones.
+      && builtins.attrNames composed.caisson-core.manifest.libOverlays == [ "dep/greeter" ]
+      && composed.caisson-core.manifest.modules.nixos."dep/service".config.origin == "dep";
 
     lifecycleProjectOverlaysObeySelection =
       let
@@ -455,7 +459,14 @@ let
           libOverlayImports = overlays: [ overlays.local ];
         };
       in
-      composed.fromLocal && !(composed ? fromDep);
+      composed.fromLocal
+      && !(composed ? fromDep)
+      # Selection controls application only; the unselected project
+      # overlay stays registered in the manifest dictionary.
+      && builtins.attrNames composed.caisson-core.manifest.libOverlays == [
+        "dep/marker"
+        "local"
+      ];
 
     lifecycleLocalModulesBeatProjectModules =
       let
@@ -477,7 +488,8 @@ let
           };
         };
       in
-      composed.caisson-core.modules.nixos."dep/service".config.origin == "local";
+      composed.caisson-core.modules.nixos."dep/service".config.origin == "local"
+      && composed.caisson-core.manifest.modules.nixos."dep/service".config.origin == "local";
 
     lifecycleProjectsMustBeAnAttrset = throws (
       core.mkLib {

@@ -507,24 +507,36 @@ let
           overlay = _final: prev: contributeModules prev modules;
         };
 
+        # The manifest's module dictionary, like its overlay
+        # dictionary, is the registered union: consumed projects'
+        # prefixed entries with the local registrations on top.
+        registeredModules =
+          projectModules
+          // builtins.listToAttrs (
+            builtins.map (class: {
+              name = class;
+              value = (projectModules.${class} or { }) // modules.${class};
+            }) (builtins.attrNames modules)
+          );
+
         # The manifest: the capture of what mkLib consumed, injected
-        # through composition like everything else.  The injector is
-        # internal and appears in neither dictionary, so the only
-        # cycles run through function closures, which no traversal
-        # enters.  Checks belong to the export side (integrations),
-        # not here.
+        # through composition like everything else.  Its dictionaries
+        # are the registered ones (project entries under
+        # `<project>/<name>`, locals winning a name collision), so
+        # export selections drawn from the manifest see project-borne
+        # entries exactly like hand-registered ones; `projects` keeps
+        # the raw per-project capture.  The injector is internal and
+        # appears in neither dictionary, so the only cycles run
+        # through function closures, which no traversal enters.
+        # Checks belong to the export side (integrations), not here.
         manifestOverlay = {
           imports = [ ];
           overlay = _final: prev: {
             caisson-core = (prev.caisson-core or { }) // {
               manifest = {
-                inherit
-                  ecosystems
-                  inputs
-                  libOverlays
-                  modules
-                  projects
-                  ;
+                inherit ecosystems inputs projects;
+                libOverlays = registeredLibOverlays;
+                modules = registeredModules;
               };
             };
           };
