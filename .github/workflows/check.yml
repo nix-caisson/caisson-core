@@ -18,27 +18,14 @@ jobs:
       - run: nix flake check -L
       - run: nix eval -f tests summary
   # The slipping compat run: caisson-compat's pinned-world suite with
-  # this working tree overriding the caisson-core pin. Needs the
-  # CAISSON_CI_SSH_KEY secret while the repositories are private;
+  # this working tree overriding the caisson-core pin;
   # non-blocking by design (compat HEAD is mutable external state).
   compat-suite:
     runs-on: ubuntu-latest
     continue-on-error: true
-    env:
-      HAVE_KEY: ${{ secrets.CAISSON_CI_SSH_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
-      - if: env.HAVE_KEY == 'false'
-        run: echo "CAISSON_CI_SSH_KEY is not set; sibling repos are private; skipping"
-      - if: env.HAVE_KEY == 'true'
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.CAISSON_CI_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-      - if: env.HAVE_KEY == 'true'
-        uses: DeterminateSystems/nix-installer-action@v16
-      - if: env.HAVE_KEY == 'true'
-        run: |
-          nix eval 'git+ssh://git@github.com/nix-caisson/caisson-compat#lib.caisson-compat.tests.summary' \
+      - uses: DeterminateSystems/nix-installer-action@v16
+      - run: |
+          nix eval 'github:nix-caisson/caisson-compat#lib.caisson-compat.tests.summary' \
             --override-input caisson-core "path:$PWD"

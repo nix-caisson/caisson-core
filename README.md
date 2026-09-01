@@ -172,7 +172,9 @@ nix eval -f tests summary
 Pre-release. The contract described above is intended to freeze;
 until the first release it may still change. The
 [caisson framework](https://github.com/nix-caisson/caisson) builds
-on this repository; its compatibility suite is not yet public.
+on this repository, and
+[caisson-compat](https://github.com/nix-caisson/caisson-compat)
+tests the family against pinned upstreams.
 
 ## License
 
