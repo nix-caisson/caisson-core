@@ -170,7 +170,9 @@ nix eval -f tests summary
 ## Status
 
 Pre-release. The contract described above is intended to freeze;
-until the first release it may still change.
+until the first release it may still change. The rest of the caisson
+family (the caisson framework and its compatibility suite) is not
+yet public.
 
 ## License
 

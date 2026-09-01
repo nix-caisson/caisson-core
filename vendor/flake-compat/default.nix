@@ -3,9 +3,9 @@
 # itself derived from github:edolstra/flake-compat. One local change: the
 # root flake.nix is imported via the ORIGINAL `src` path value (see the
 # `flakeNixPath` binding and its comment) so that loading a store-subpath
-# flake — e.g. a repo's tests/dependencies dir — works under read-only
+# flake (e.g. a repo's tests/dependencies dir) works under read-only
 # evaluation (`nix flake check --no-build` sets settings.readOnlyMode,
-# making eval-time path coercions FetchMode::DryRun — computed, never
+# making eval-time path coercions FetchMode::DryRun: computed, never
 # written; no canonical upstream issue covers this, and nix#12440 is NOT
 # it: closed by its reporter as their own IFD). Upstream (checked
 # 2026-07-14, identical on flake-parts main) imports through the coerced
@@ -245,7 +245,7 @@ let
           # store object it came from, whose content is by construction
           # identical to the copy's. Importing via `outPath` goes through the
           # string the "massage" coerced, which re-adds the tree as a fresh
-          # store object — a store write that read-only evaluation (`nix flake
+          # store object, a store write that read-only evaluation (`nix flake
           # check --no-build`) cannot perform, failing with
           # "path '…' is not valid" unless the object was pre-materialized.
           # The store-prefix guard keeps this a strict no-op for non-store
