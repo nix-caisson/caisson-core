@@ -12,9 +12,9 @@
 #   - The base is contributed as an opaque attribute set.  Overriding
 #     one of its attributes does not re-tie its internal references.
 #   - `baseLib` is a plain argument.  Nothing here looks anything up
-#     by input name, and there is no miss to report: a caller that
-#     wants a default threads one (the injected `caisson-core.mkLib`
-#     defaults to its own composition's base).
+#     by input name; a caller that wants a default threads one (the
+#     injected `caisson-core.mkLib` defaults to its own composition's
+#     base).
 #   - Only this file puts things into the composed library's
 #     `caisson-core` namespace.  The manifest (the capture of what
 #     mkLib consumed) enters through composition as a synthetic
@@ -35,8 +35,9 @@ let
   # Use a list of built overlays (`{ imports, overlay }` attrsets,
   # imports applied before the overlay itself) to extend a base
   # library.  The chain is flattened depth-first, imports before self,
-  # duplicates preserved, and applied as anonymous entries
-  # over the base, which reproduces the historical fold order exactly.
+  # duplicates preserved, and applied as anonymous entries over the
+  # base.  The order is part of the contract: an overlay may rely on
+  # its imports having applied before it.
   mkExtendedLib =
     let
       flattenOverlay =
