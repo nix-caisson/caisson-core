@@ -226,8 +226,8 @@ let
           in
           if requiresImport then
             # `key` mirrors the module system's identity for path imports: the
-            # same file passed through mkModule at two sites deduplicates just
-            # like importing the same path twice would.
+            # same file passed through mkModule at two sites deduplicates
+            # the same way importing the same path twice would.
             {
               _file = freeformModule;
               key = builtins.toString freeformModule;
