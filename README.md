@@ -160,6 +160,6 @@ until the first release it may still change.
 
 MIT. See [LICENSE](LICENSE).
 
-Despite the org name, caisson-core is an independent project, not affiliated with or
-endorsed by the NixOS Foundation. Nix and NixOS are trademarks of the
-NixOS Foundation.
+Despite the org name, caisson-core is an independent project, not
+affiliated with or endorsed by the NixOS Foundation. Nix and NixOS
+are trademarks of the NixOS Foundation.
