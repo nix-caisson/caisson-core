@@ -637,10 +637,11 @@ let
         # registrations, prefixed names beside short ones; a later
         # registration wins a name collision, so a local one beats a
         # project's and either beats a published one. A registered
-        # overlay's compose key is its registry name unless it carries
-        # a key of its own, so registering under a published name
-        # replaces that entry wherever it is composed.
-        registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = overlay.key or name; }) (
+        # overlay's compose key is its registry name here, whatever
+        # key it carried from the tree that built it (two projects may
+        # each export a `default`), so registering under a published
+        # name replaces that entry wherever it is composed.
+        registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
           {
             caisson-core = coreOverlay;
             nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource;

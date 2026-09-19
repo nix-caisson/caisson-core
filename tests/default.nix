@@ -391,6 +391,37 @@ let
       in
       otherTree.viaUpstream == 2 && here.viaUpstream == 3;
 
+    # Two projects each exporting an overlay registered as `default`
+    # both compose here: the compose key is the registry name in this
+    # tree, not the key the overlay carried from its own.
+    lifecycleProjectOverlaysKeepTheirRegistryNames =
+      let
+        project =
+          marker:
+          (core.mkLib {
+            inputs = { };
+            libOverlays = mkLibOverlay: {
+              default = mkLibOverlay ({ ... }: { overlay = _final: _prev: { ${marker} = true; }; });
+            };
+          }).caisson-core.libManifest.libOverlays;
+        composed = core.mkLib {
+          inputs = { };
+          projects = {
+            a = {
+              libOverlays = {
+                inherit (project "fromA") default;
+              };
+            };
+            b = {
+              libOverlays = {
+                inherit (project "fromB") default;
+              };
+            };
+          };
+        };
+      in
+      composed.fromA && composed.fromB;
+
     # Registering under a published name replaces the entry for every
     # importer.
     lifecycleRegistrationReplacesThePublishedEntry =
