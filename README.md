@@ -113,13 +113,16 @@ core.mkLib {
                                       # higher layers
   projects = { };                     # consumed upstream contributions,
                                       # by project name
+  systems = [ "x86_64-linux" ];       # the platforms the tree builds on,
+                                      # declared once; null when absent
 }
 ```
 
 The composed library carries, under `caisson-core`: `mkLib` (with
 `baseLib` defaulting to this composition's base), `mkLibOverlay`,
 `mkModule` (class-parameterized), the class-keyed `modules` registry,
-the `manifest`, plus `compose`, `resolve`, `importApply`,
+the three manifest slots (`libManifest`, `pkgsManifest`,
+`evalManifest`), plus `compose`, `resolve`, `importApply`,
 `callConsumerFlake`, and `partitionExtraInputs`. Overlays contribute
 modules through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
@@ -134,10 +137,14 @@ already publishes. Its entries join the registered dictionaries under
 and a local registration wins a name collision.
 
 The manifest is the composition's self-description, recorded at
-`caisson-core.manifest`: `inputs`, `ecosystems`, the raw `projects`
-capture, and the registered `libOverlays` and `modules` dictionaries
-(project entries prefixed, locals winning). It is not passed
-anywhere; readers pull it back out of the composed library. Higher
+`caisson-core.libManifest`: `inputs`, `ecosystems`, `systems`, the
+raw `projects` capture, and the registered `libOverlays` and
+`modules` dictionaries (project entries prefixed, locals winning). It
+is not passed anywhere; readers pull it back out of the composed
+library. There is a slot per evaluation phase: `libManifest` is
+filled here, and `pkgsManifest` and `evalManifest` are present and
+null, for the layers that build package sets and module evaluations
+to fill on the libraries they hand out. Higher
 layers project a flake's `libOverlays` and `modules` outputs from it,
 and the `projects` argument consumes those projections one level
 down, which is how dictionaries populate across flakes. The manifest
