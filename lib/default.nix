@@ -179,5 +179,6 @@ in
     mkCoreOverlay
     mkExtendedLib
     mkLib
+    mkNixpkgsLibEntry
     ;
 }

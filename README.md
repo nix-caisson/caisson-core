@@ -94,23 +94,21 @@ miss is deliberately the calling layer's job.
 
 ## The library lifecycle
 
-`mkLib` builds a composed library from a base library plus registered
-overlays and modules, and injects the `caisson-core` namespace
+`mkLib` builds a composed library from registered overlays and
+modules over the empty seed, and injects the `caisson-core` namespace
 (machinery, module registry, manifest) into the result:
 
 ```nix
 core.mkLib {
   inputs = inputs;        # the composing flake's inputs, closed over
                           # by registered overlays and modules
-  baseLib = baseLib;      # the base library, as a plain argument;
-                          # nothing is looked up by input name
+  defaultEcosystemSrc = { nixpkgs = inputs.nixpkgs; };
+                          # the tree's default source per ecosystem, by
+                          # exact name; `nixpkgs` supplies the nixpkgs-lib
+                          # part unless `nixpkgs-lib` names its own source
   modules = composedLib: { };         # class-keyed local registrations
   libOverlays = mkLibOverlay: { };    # named overlay registrations
   libOverlayImports = builtins.attrValues;  # selection for this library
-  ecosystems = { };                   # declared ecosystem sources, by
-                                      # exact name; captured into the
-                                      # manifest, interpreted by
-                                      # higher layers
   projects = { };                     # consumed upstream contributions,
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on,
@@ -118,12 +116,27 @@ core.mkLib {
 }
 ```
 
-The composed library carries, under `caisson-core`: `mkLib` (with
-`baseLib` defaulting to this composition's base), `mkLibOverlay`,
-`mkModule` (class-parameterized), the class-keyed `modules` registry,
-the three manifest slots (`libManifest`, `pkgsManifest`,
-`evalManifest`), plus `compose`, `resolve`, `importApply`,
-`callConsumerFlake`, and `partitionExtraInputs`. Overlays contribute
+Nothing is composed over. nixpkgs' library arrives as the published
+`nixpkgs-lib` entry, which imports the `lib` directory of the source
+supplying that part (`defaultEcosystemSrc.nixpkgs-lib`, else
+`.nixpkgs`, else an input named exactly so) as that source fixes it;
+a polyfill composed later overrides a name for readers of the
+composed library, not for upstream's own internal references, since
+nixpkgs' `lib/default.nix` exposes no way to re-tie its fixpoint. An
+overlay that needs upstream's functions imports the
+entry from its closure (`{ entries, ... }: { imports = [ entries.nixpkgs-lib ]; ... }`);
+a composition that declares no source fails only where that entry is
+composed, with a message naming the declaration. The core entry
+(`caisson-core`) and the `nixpkgs-lib` entry sit in the registry under
+those names like any registration, so a same-name registration
+replaces either.
+
+The composed library carries, under `caisson-core`: `mkLib`,
+`mkLibOverlay`, `mkModule` (class-parameterized),
+`mkNixpkgsLibEntry`, the class-keyed `modules` registry, the three
+manifest slots (`libManifest`, `pkgsManifest`, `evalManifest`), plus
+`compose`, `resolve`, `importApply`, `callConsumerFlake`, and
+`partitionExtraInputs`. Overlays contribute
 modules through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
 same-named contributions. `mkCoreOverlay` exposes the same namespace
@@ -137,8 +150,8 @@ already publishes. Its entries join the registered dictionaries under
 and a local registration wins a name collision.
 
 The manifest is the composition's self-description, recorded at
-`caisson-core.libManifest`: `inputs`, `ecosystems`, `systems`, the
-raw `projects` capture, and the registered `libOverlays` and
+`caisson-core.libManifest`: `inputs`, `defaultEcosystemSrc`,
+`systems`, the raw `projects` capture, and the registered `libOverlays` and
 `modules` dictionaries (project entries prefixed, locals winning). It
 is not passed anywhere; readers pull it back out of the composed
 library. There is a slot per evaluation phase: `libManifest` is

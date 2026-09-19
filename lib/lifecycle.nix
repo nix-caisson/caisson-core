@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 #
-# The library lifecycle: building a composed library from a base
-# library plus registered overlays and modules, and injecting the
+# The library lifecycle: building a composed library from registered
+# overlays and modules over the empty seed, and injecting the
 # `caisson-core` namespace (machinery, registry, manifest) into the
 # result.  mkLib is the entry point; mkCoreOverlay is the same
 # injection as a standalone entry for compositions assembled
@@ -9,12 +9,13 @@
 #
 # Contracts, shared with `compose`:
 #
-#   - The base is contributed as an opaque attribute set.  Overriding
-#     one of its attributes does not re-tie its internal references.
-#   - `baseLib` is a plain argument.  Nothing here looks anything up
-#     by input name; a caller that wants a default threads one (the
-#     injected `caisson-core.mkLib` defaults to its own composition's
-#     base).
+#   - Nothing is composed over: every function a library holds
+#     arrives as an entry, nixpkgs' library included (the published
+#     `nixpkgs-lib` entry, composed as upstream fixes it).
+#   - The source of that entry is the tree's declared
+#     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or an input
+#     named exactly so, through `resolve`; a miss is null, and the
+#     entry names the declaration only where it is composed.
 #   - Only this file puts things into the composed library's
 #     `caisson-core` namespace.  The manifest (the capture of what
 #     mkLib consumed) enters through composition as a synthetic
@@ -38,37 +39,124 @@ let
   # duplicates preserved, and applied as anonymous entries over the
   # base.  The order is part of the contract: an overlay may rely on
   # its imports having applied before it.
-  mkExtendedLib =
+  # Compose registered overlays into a library. The seed is the empty
+  # attribute set: nothing is composed over, and everything a library
+  # holds arrives as an entry. A keyed overlay keeps its key, so
+  # `compose` deduplicates it and a same-key overlay registered later
+  # replaces it; a keyless overlay joins the tail in list order.
+  # Keyless imports are flattened in front of their importer as
+  # before; keyed imports stay imports, which `compose` walks.
+  #
+  # `published` maps a key to the entry the composing tree holds under
+  # it. An import addresses a stable identity, so an overlay built in
+  # another tree that imports that tree's `nixpkgs-lib` entry gets
+  # this tree's when composed here: every keyed entry or import whose
+  # key is published is read from the map, not from the value the
+  # importer carried.
+  composeRegistered =
+    { published ? { } }:
     let
-      flattenOverlay =
+      isKeyed = overlay: (overlay.key or null) != null;
+      byKey = overlay: if isKeyed overlay && published ? ${overlay.key} then published.${overlay.key} else overlay;
+      checkShape =
         overlay:
         if (builtins.isAttrs overlay) && (builtins.hasAttr "overlay" overlay) then
-          (builtins.concatMap flattenOverlay (overlay.imports or [ ]))
-          ++ [
-            {
-              key = null;
-              imports = [ ];
-              overlay = overlay.overlay;
-            }
-          ]
+          overlay
         else
           throw ''
             Library overlays are `{ imports, overlay }` attrsets (build them
             with mkLibOverlay, or use another flake's exported overlays), but
             composition encountered a ${builtins.typeOf overlay}.
           '';
+      # A keyed overlay's imports stay imports, which `compose` walks
+      # before the importer; a keyless import among them gets a stable
+      # synthetic key derived from the importer key, so it keeps that
+      # position rather than falling into the keyless tail.
+      keyedImports =
+        key: imports:
+        builtins.genList (
+          i:
+          let
+            raw = checkShape (builtins.elemAt imports i);
+          in
+          if isKeyed raw then
+            byKey raw
+          else
+            let
+              synthetic = "${key}/imports/${toString i}";
+            in
+            raw
+            // {
+              key = synthetic;
+              imports = keyedImports synthetic (raw.imports or [ ]);
+            }
+        ) (builtins.length imports);
+      flattenOverlay =
+        raw:
+        let
+          overlay = byKey (checkShape raw);
+          imports = overlay.imports or [ ];
+        in
+        if isKeyed overlay then
+          [
+            {
+              inherit (overlay) key;
+              imports = keyedImports overlay.key imports;
+              overlay = overlay.overlay;
+            }
+          ]
+        else
+          let
+            keyless = builtins.filter (i: !(isKeyed i)) imports;
+            keyed = builtins.map byKey (builtins.filter isKeyed imports);
+          in
+          (builtins.concatMap flattenOverlay keyless)
+          ++ [
+            {
+              key = null;
+              imports = keyed;
+              overlay = overlay.overlay;
+            }
+          ];
     in
-    overlays: baseLib:
-    (compose {
-      entries = [
-        {
-          key = null;
-          imports = [ ];
-          overlay = _final: _prev: baseLib;
-        }
-      ]
-      ++ builtins.concatMap flattenOverlay overlays;
-    }).lib;
+    overlays: (compose { entries = builtins.concatMap flattenOverlay overlays; }).lib;
+
+  mkExtendedLib = composeRegistered { };
+
+  # The entry that brings nixpkgs' library into a composition: the
+  # functions of the source supplying the `nixpkgs-lib` part of the
+  # stack, as that source fixes them. (nixpkgs' lib/default.nix builds
+  # its fixpoint with a bootstrap makeExtensible that exposes `extend`
+  # only, no `__unfix__`, so the library cannot be re-tied over the
+  # composed fixpoint here; a polyfill composed later overrides a
+  # name for readers of the composed lib, not for upstream's own
+  # internal references.) `src` is a tree holding nixpkgs' `lib`
+  # directory, either a nixpkgs checkout or the nixpkgs.lib mirror, or
+  # that directory itself; null means no source was declared, and the
+  # entry then fails where it is composed, naming the declaration.
+  # Published under the key `nixpkgs-lib`: an overlay that needs
+  # upstream's functions imports it, and a same-key entry replaces it.
+  mkNixpkgsLibEntry = src: {
+    key = "nixpkgs-lib";
+    imports = [ ];
+    overlay =
+      _final: prev:
+      let
+        root =
+          if src == null then
+            throw ''
+              caisson-core: the `nixpkgs-lib` entry has no source. Declare
+              `defaultEcosystemSrc.nixpkgs-lib` (the nixpkgs.lib mirror, or nixpkgs'
+              `lib` directory) or `defaultEcosystemSrc.nixpkgs` (a nixpkgs checkout)
+              in the mkLib call, or give the composing flake an input named exactly
+              `nixpkgs-lib` or `nixpkgs`.
+            ''
+          else
+            "${src}";
+        libDir = if builtins.pathExists "${root}/lib/default.nix" then "${root}/lib" else root;
+      in
+      prev // import libDir;
+  };
 
   # Build a composition-bound mkLibOverlay: everything passed to it
   # takes the closure attrset, `{ closure-inputs, mkLibOverlay, ... }:`,
@@ -324,11 +412,15 @@ let
       # closure-self-modules.  Empty for compositions with no
       # registration phase.
       selfModules ? { },
-      # Default base for re-invocations of the injected mkLib; null
-      # keeps `baseLib` required there.
-      defaultBaseLib ? null,
+      # The published entries an overlay file may import from its
+      # closure (`{ entries, ... }:`), the `nixpkgs-lib` entry among
+      # them. Empty for compositions assembled without mkLib.
+      entries ? { },
     }:
     {
+      # The core entry: registered under this key like any entry, so
+      # the registry shows it and a same-key entry replaces it.
+      key = "caisson-core";
       imports = [ ];
       overlay = final: prev: {
         caisson-core = (prev.caisson-core or { }) // {
@@ -338,9 +430,9 @@ let
             importApply
             callConsumerFlake
             partitionExtraInputs
+            mkLib
+            mkNixpkgsLibEntry
             ;
-          mkLib =
-            if defaultBaseLib == null then mkLib else (args: mkLib ({ baseLib = defaultBaseLib; } // args));
           mkModule = mkModuleForComposition {
             inherit inputs selfModules;
             finalLib = final;
@@ -352,7 +444,7 @@ let
             # these.
             extraOverlayClosure = {
               mkModule = final.caisson-core.mkModule;
-              inherit contributeModules;
+              inherit contributeModules entries;
             };
           };
           # Seed only: overlay contributions merge in during
@@ -378,11 +470,6 @@ let
       let
         resolvedArgs = if builtins.isAttrs rawArgs then rawArgs else throw "mkLib expects an attrset.";
 
-        baseLib =
-          resolvedArgs.baseLib or (throw ''
-            mkLib requires `baseLib`: the base library to compose over is a
-            plain argument (nothing is looked up by input name).
-          '');
         inputs =
           resolvedArgs.inputs or (throw ''
             mkLib requires `inputs`: the composing flake's inputs, closed over
@@ -392,7 +479,14 @@ let
         rawModules = resolvedArgs.modules or (composedLib: { });
         rawLibOverlays = resolvedArgs.libOverlays or (mkLibOverlay: { });
         libOverlayImports = resolvedArgs.libOverlayImports or (overlays: builtins.attrValues overlays);
-        rawEcosystems = resolvedArgs.ecosystems or { };
+        rawEcosystems =
+          if resolvedArgs ? ecosystems then
+            throw ''
+              mkLib no longer takes `ecosystems`: the tree's default source per
+              ecosystem is declared as `defaultEcosystemSrc` (the same shape).
+            ''
+          else
+            resolvedArgs.defaultEcosystemSrc or { };
         rawProjects = resolvedArgs.projects or { };
         rawSystems = resolvedArgs.systems or null;
 
@@ -461,15 +555,44 @@ let
         # (explicit argument, then these declarations, then an input
         # with exactly the declared name). Nothing here interprets
         # them.
-        ecosystems =
+        defaultEcosystemSrc =
           if builtins.isAttrs rawEcosystems then
             rawEcosystems
           else
             throw ''
-              mkLib expects `ecosystems` to be an attribute set of ecosystem
+              mkLib expects `defaultEcosystemSrc` to be an attribute set of ecosystem
               sources keyed by their exact names (e.g. `{ nixpkgs = ...; }`),
               but got a ${builtins.typeOf rawEcosystems}.
             '';
+
+        # The source supplying the `nixpkgs-lib` part of the stack: the
+        # part declared on its own, else the tree's nixpkgs (one pin
+        # supplies every part), else an input named exactly as either;
+        # null when nothing declares it.
+        nixpkgsLibSource =
+          let
+            fromPart = resolve {
+              name = "nixpkgs-lib";
+              defaults = defaultEcosystemSrc;
+              inherit inputs;
+            };
+            fromNixpkgs = resolve {
+              name = "nixpkgs";
+              defaults = defaultEcosystemSrc;
+              inherit inputs;
+            };
+          in
+          if fromPart != null then fromPart else fromNixpkgs;
+
+        # The entries caisson-core publishes into every composition,
+        # reachable from an overlay file's closure as `entries.<name>`.
+        # They are read back from the registry, so a registration
+        # under the same name is what importers get: replacing a
+        # published entry is registering one. (A replacement that
+        # imports the entry it replaces imports itself.)
+        publishedEntries = {
+          nixpkgs-lib = registeredLibOverlays.nixpkgs-lib;
+        };
 
         modules =
           if builtins.isFunction rawModules then
@@ -499,20 +622,48 @@ let
           extraOverlayClosure = {
             mkModule = finalLib.caisson-core.mkModule;
             inherit contributeModules;
+            entries = publishedEntries;
           };
         };
-
-        # The selection sees consumed projects' overlays beside the
-        # local registrations, prefixed names beside short ones; a
-        # local registration wins a name collision.
-        registeredLibOverlays = projectLibOverlays // libOverlays;
-        importedLibOverlays = libOverlayImports registeredLibOverlays;
 
         coreOverlay = mkCoreOverlay {
           inherit inputs;
           selfModules = modules;
-          defaultBaseLib = baseLib;
+          entries = publishedEntries;
         };
+
+        # The registry: the forced entries caisson-core publishes,
+        # then consumed projects' overlays, then the local
+        # registrations, prefixed names beside short ones; a later
+        # registration wins a name collision, so a local one beats a
+        # project's and either beats a published one. A registered
+        # overlay's compose key is its registry name unless it carries
+        # a key of its own, so registering under a published name
+        # replaces that entry wherever it is composed.
+        registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = overlay.key or name; }) (
+          {
+            caisson-core = coreOverlay;
+            nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource;
+          }
+          // projectLibOverlays
+          // libOverlays
+        );
+
+        # The selection: the core entry is always composed and first;
+        # the rest is what `libOverlayImports` selects from the
+        # registry's project and local entries. The published entries
+        # are not selectable: `nixpkgs-lib` is composed wherever an
+        # overlay imports it, and nowhere otherwise. `compose`
+        # deduplicates by key, so an entry imported twice composes
+        # once.
+        publishedNames = [
+          "caisson-core"
+          "nixpkgs-lib"
+        ];
+        importedLibOverlays = [
+          registeredLibOverlays.caisson-core
+        ]
+        ++ libOverlayImports (builtins.removeAttrs registeredLibOverlays publishedNames);
 
         # Consumed projects' modules enter the registry like overlay
         # contributions: available to every selection, beaten by a
@@ -559,7 +710,7 @@ let
             caisson-core = (prev.caisson-core or { }) // {
               libManifest = {
                 inherit
-                  ecosystems
+                  defaultEcosystemSrc
                   inputs
                   projects
                   systems
@@ -571,15 +722,24 @@ let
           };
         };
 
-        finalLib = mkExtendedLib (
-          [ coreOverlay ]
-          ++ importedLibOverlays
-          ++ [
-            projectModulesOverlay
-            localModulesOverlay
-            manifestOverlay
-          ]
-        ) baseLib;
+        finalLib =
+          composeRegistered
+            {
+              published = builtins.listToAttrs (
+                builtins.map (name: {
+                  inherit name;
+                  value = registeredLibOverlays.${name};
+                }) publishedNames
+              );
+            }
+            (
+              importedLibOverlays
+              ++ [
+                projectModulesOverlay
+                localModulesOverlay
+                manifestOverlay
+              ]
+            );
 
       in
       # Surface argument-shape errors as soon as the result is used,
@@ -588,7 +748,7 @@ let
       # the non-function case.
       builtins.seq (builtins.isFunction rawModules || modules) (
         builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
-          builtins.seq (builtins.isAttrs rawEcosystems || ecosystems) (
+          builtins.seq (builtins.isAttrs rawEcosystems || defaultEcosystemSrc) (
             builtins.seq (builtins.isAttrs rawProjects || projects) (
               builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) finalLib
             )
@@ -606,5 +766,6 @@ in
     mkCoreOverlay
     mkExtendedLib
     mkLib
+    mkNixpkgsLibEntry
     ;
 }
