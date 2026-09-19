@@ -119,9 +119,11 @@ core.mkLib {
 Nothing is composed over. nixpkgs' library arrives as the published
 `nixpkgs-lib` entry, which imports the `lib` directory of the source
 supplying that part (`defaultEcosystemSrc.nixpkgs-lib`, else
-`.nixpkgs`, else an input named exactly so) and re-ties it over the
-composed fixpoint, so a polyfill composed later is seen by upstream's
-own functions. An overlay that needs upstream's functions imports the
+`.nixpkgs`, else an input named exactly so) as that source fixes it;
+a polyfill composed later overrides a name for readers of the
+composed library, not for upstream's own internal references, since
+nixpkgs' `lib/default.nix` exposes no way to re-tie its fixpoint. An
+overlay that needs upstream's functions imports the
 entry from its closure (`{ entries, ... }: { imports = [ entries.nixpkgs-lib ]; ... }`);
 a composition that declares no source fails only where that entry is
 composed, with a message naming the declaration. The core entry

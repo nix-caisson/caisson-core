@@ -276,9 +276,9 @@ let
       composed.marker == 1 && composed.x == 2;
 
     # The nixpkgs-lib entry: composed where an overlay imports it,
-    # from the declared source, re-tied over the composed fixpoint so
-    # a later overlay's definition is seen by the upstream function
-    # that reads it.
+    # from the declared source, as that source fixes it: a later
+    # overlay's definition is seen by readers of the composed lib and
+    # not by the upstream function that reads the name internally.
     lifecycleNixpkgsLibEntryComposesFromTheDeclaredSource =
       let
         composed = core.mkLib {
@@ -298,7 +298,7 @@ let
           };
         };
       in
-      composed.viaUpstream == 101 && composed.stubReadsSelf == 110 && composed ? extend;
+      composed.viaUpstream == 101 && composed.stubReadsSelf == 11 && composed ? extend;
 
     lifecycleNixpkgsLibEntryDerivesFromTheNixpkgsSource =
       let

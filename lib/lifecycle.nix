@@ -11,7 +11,7 @@
 #
 #   - Nothing is composed over: every function a library holds
 #     arrives as an entry, nixpkgs' library included (the published
-#     `nixpkgs-lib` entry, re-tied over the composed fixpoint).
+#     `nixpkgs-lib` entry, composed as upstream fixes it).
 #   - The source of that entry is the tree's declared
 #     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or an input
 #     named exactly so, through `resolve`; a miss is null, and the
@@ -90,19 +90,22 @@ let
 
   # The entry that brings nixpkgs' library into a composition: the
   # functions of the source supplying the `nixpkgs-lib` part of the
-  # stack, re-tied over the composed fixpoint (`__unfix__ final`) so a
-  # same-key polyfill composed later is seen by upstream's own
-  # functions. `src` is a tree holding nixpkgs' `lib` directory, either
-  # a nixpkgs checkout or the nixpkgs.lib mirror, or that directory
-  # itself; null means no source was declared, and the entry then
-  # fails where it is composed, naming the declaration. Published
-  # under the key `nixpkgs-lib`: an overlay that needs upstream's
-  # functions imports it, and a same-key entry replaces it.
+  # stack, as that source fixes them. (nixpkgs' lib/default.nix builds
+  # its fixpoint with a bootstrap makeExtensible that exposes `extend`
+  # only, no `__unfix__`, so the library cannot be re-tied over the
+  # composed fixpoint here; a polyfill composed later overrides a
+  # name for readers of the composed lib, not for upstream's own
+  # internal references.) `src` is a tree holding nixpkgs' `lib`
+  # directory, either a nixpkgs checkout or the nixpkgs.lib mirror, or
+  # that directory itself; null means no source was declared, and the
+  # entry then fails where it is composed, naming the declaration.
+  # Published under the key `nixpkgs-lib`: an overlay that needs
+  # upstream's functions imports it, and a same-key entry replaces it.
   mkNixpkgsLibEntry = src: {
     key = "nixpkgs-lib";
     imports = [ ];
     overlay =
-      final: prev:
+      _final: prev:
       let
         root =
           if src == null then
@@ -116,9 +119,8 @@ let
           else
             "${src}";
         libDir = if builtins.pathExists "${root}/lib/default.nix" then "${root}/lib" else root;
-        upstream = import libDir;
       in
-      prev // (upstream.__unfix__ final) // { inherit (upstream) extend; };
+      prev // import libDir;
   };
 
   # Build a composition-bound mkLibOverlay: everything passed to it
