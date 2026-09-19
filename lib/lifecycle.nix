@@ -360,6 +360,14 @@ let
           # a final overlay so the composing flake's own entries win
           # over contributed ones.
           modules = (prev.caisson-core or { }).modules or { };
+          # The manifest slots, one per evaluation phase: the lib
+          # (filled by mkLib), the package set (filled on the lib
+          # inside a package set) and the module evaluation (filled on
+          # the lib an evaluation is built with). All three are present
+          # on every composed library and null until filled.
+          libManifest = (prev.caisson-core or { }).libManifest or null;
+          pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
+          evalManifest = (prev.caisson-core or { }).evalManifest or null;
         };
       };
     };
@@ -386,6 +394,20 @@ let
         libOverlayImports = resolvedArgs.libOverlayImports or (overlays: builtins.attrValues overlays);
         rawEcosystems = resolvedArgs.ecosystems or { };
         rawProjects = resolvedArgs.projects or { };
+        rawSystems = resolvedArgs.systems or null;
+
+        # The platforms the tree builds on, declared once here and
+        # read from the manifest by whatever needs a system list
+        # before any evaluation names a host platform. Null when the
+        # composition declares none.
+        systems =
+          if rawSystems == null || (builtins.isList rawSystems && builtins.all builtins.isString rawSystems) then
+            rawSystems
+          else
+            throw ''
+              mkLib expects `systems` to be a list of system strings (e.g.
+              `[ "x86_64-linux" ]`), but got a ${builtins.typeOf rawSystems}.
+            '';
 
         # Consumed projects: whole upstream contributions, registered
         # as units.  A project value is assumed to carry `libOverlays`
@@ -520,22 +542,28 @@ let
             }) (builtins.attrNames modules)
           );
 
-        # The manifest: the capture of what mkLib consumed, injected
-        # through composition like everything else.  Its dictionaries
-        # are the registered ones (project entries under
-        # `<project>/<name>`, locals winning a name collision), so
-        # export selections drawn from the manifest see project-borne
-        # entries exactly like hand-registered ones; `projects` keeps
-        # the raw per-project capture.  The injector is internal and
-        # appears in neither dictionary, so the only cycles run
-        # through function closures, which no traversal enters.
-        # Checks belong to the export side (integrations), not here.
+        # The lib manifest: the capture of what mkLib consumed, filled
+        # into the `libManifest` slot through composition like
+        # everything else.  Its dictionaries are the registered ones
+        # (project entries under `<project>/<name>`, locals winning a
+        # name collision), so export selections drawn from the
+        # manifest see project-borne entries exactly like
+        # hand-registered ones; `projects` keeps the raw per-project
+        # capture.  The injector is internal and appears in neither
+        # dictionary, so the only cycles run through function
+        # closures, which no traversal enters.  Checks belong to the
+        # export side (integrations), not here.
         manifestOverlay = {
           imports = [ ];
           overlay = _final: prev: {
             caisson-core = (prev.caisson-core or { }) // {
-              manifest = {
-                inherit ecosystems inputs projects;
+              libManifest = {
+                inherit
+                  ecosystems
+                  inputs
+                  projects
+                  systems
+                  ;
                 libOverlays = registeredLibOverlays;
                 modules = registeredModules;
               };
@@ -561,7 +589,9 @@ let
       builtins.seq (builtins.isFunction rawModules || modules) (
         builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
           builtins.seq (builtins.isAttrs rawEcosystems || ecosystems) (
-            builtins.seq (builtins.isAttrs rawProjects || projects) finalLib
+            builtins.seq (builtins.isAttrs rawProjects || projects) (
+              builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) finalLib
+            )
           )
         )
       )

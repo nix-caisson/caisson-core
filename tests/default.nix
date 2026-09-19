@@ -353,7 +353,7 @@ let
             a = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
           };
         };
-        manifest = composed.caisson-core.manifest;
+        manifest = composed.caisson-core.libManifest;
       in
       builtins.attrNames manifest == [
         "ecosystems"
@@ -361,12 +361,55 @@ let
         "libOverlays"
         "modules"
         "projects"
+        "systems"
       ]
       && manifest.inputs == theInputs
       && manifest.ecosystems == { }
+      && manifest.systems == null
       && builtins.attrNames manifest.libOverlays == [ "a" ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
+
+    # The three phase slots are present on every composed library;
+    # mkLib fills the lib one and leaves the other two null.
+    lifecycleManifestSlotsArePresentAndNullUntilFilled =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+        };
+      in
+      builtins.isAttrs composed.caisson-core.libManifest
+      && composed.caisson-core.pkgsManifest == null
+      && composed.caisson-core.evalManifest == null;
+
+    lifecycleSystemsAreDeclaredOnMkLib =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          baseLib = { };
+          systems = [
+            "x86_64-linux"
+            "aarch64-linux"
+          ];
+        };
+      in
+      composed.caisson-core.libManifest.systems == [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+
+    lifecycleSystemsMustBeAListOfStrings =
+      throws (core.mkLib {
+        inputs = { };
+        baseLib = { };
+        systems = "x86_64-linux";
+      })
+      && throws (core.mkLib {
+        inputs = { };
+        baseLib = { };
+        systems = [ 1 ];
+      });
 
     lifecycleEcosystemDeclarationsJoinTheManifest =
       let
@@ -378,7 +421,7 @@ let
           };
         };
       in
-      composed.caisson-core.manifest.ecosystems.nixpkgs == "/probe-nixpkgs";
+      composed.caisson-core.libManifest.ecosystems.nixpkgs == "/probe-nixpkgs";
 
     lifecycleEcosystemsMustBeAnAttrset = throws (
       core.mkLib {
@@ -429,11 +472,11 @@ let
       in
       composed.greet "world" == "hello, world"
       && composed.caisson-core.modules.nixos."dep/service".config.origin == "dep"
-      && builtins.attrNames composed.caisson-core.manifest.projects == [ "dep" ]
+      && builtins.attrNames composed.caisson-core.libManifest.projects == [ "dep" ]
       # The manifest dictionaries carry the registered union, so the
       # export side sees project entries like hand-registered ones.
-      && builtins.attrNames composed.caisson-core.manifest.libOverlays == [ "dep/greeter" ]
-      && composed.caisson-core.manifest.modules.nixos."dep/service".config.origin == "dep";
+      && builtins.attrNames composed.caisson-core.libManifest.libOverlays == [ "dep/greeter" ]
+      && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "dep";
 
     lifecycleProjectOverlaysObeySelection =
       let
@@ -463,7 +506,7 @@ let
       && !(composed ? fromDep)
       # Selection controls application only; the unselected project
       # overlay stays registered in the manifest dictionary.
-      && builtins.attrNames composed.caisson-core.manifest.libOverlays == [
+      && builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
         "dep/marker"
         "local"
       ];
@@ -489,7 +532,7 @@ let
         };
       in
       composed.caisson-core.modules.nixos."dep/service".config.origin == "local"
-      && composed.caisson-core.manifest.modules.nixos."dep/service".config.origin == "local";
+      && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "local";
 
     lifecycleProjectsMustBeAnAttrset = throws (
       core.mkLib {
