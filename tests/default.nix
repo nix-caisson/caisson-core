@@ -249,6 +249,36 @@ let
       }
     );
 
+    # A registered overlay's keyless imports still apply before it,
+    # and before the overlay that imports the importer.
+    lifecycleKeylessImportsApplyBeforeTheirImporter =
+      let
+        deeper = {
+          imports = [ ];
+          overlay = _final: _prev: { deeper = "d"; };
+        };
+        deep = {
+          imports = [ deeper ];
+          overlay = _final: prev: { deep = prev.deeper + "e"; };
+        };
+        composed = core.mkLib {
+          inputs = { };
+          libOverlays = mkLibOverlay: {
+            main = mkLibOverlay (
+              { ... }:
+              {
+                imports = [ deep ];
+                overlay = _final: prev: {
+                  sawDeep = prev.deep;
+                  sawDeeper = prev.deeper;
+                };
+              }
+            );
+          };
+        };
+      in
+      composed.sawDeep == "de" && composed.sawDeeper == "d";
+
     # Nothing is composed over: a composition with no source declared
     # is a bare library that composes fine until something imports the
     # nixpkgs-lib entry.

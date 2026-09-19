@@ -58,31 +58,66 @@ let
     let
       isKeyed = overlay: (overlay.key or null) != null;
       byKey = overlay: if isKeyed overlay && published ? ${overlay.key} then published.${overlay.key} else overlay;
-      flattenOverlay =
-        raw:
-        let
-          overlay = byKey raw;
-        in
+      checkShape =
+        overlay:
         if (builtins.isAttrs overlay) && (builtins.hasAttr "overlay" overlay) then
-          let
-            imports = overlay.imports or [ ];
-            keyless = builtins.filter (i: !(isKeyed i)) imports;
-            keyed = builtins.map byKey (builtins.filter isKeyed imports);
-          in
-          (builtins.concatMap flattenOverlay keyless)
-          ++ [
-            {
-              key = overlay.key or null;
-              imports = keyed;
-              overlay = overlay.overlay;
-            }
-          ]
+          overlay
         else
           throw ''
             Library overlays are `{ imports, overlay }` attrsets (build them
             with mkLibOverlay, or use another flake's exported overlays), but
             composition encountered a ${builtins.typeOf overlay}.
           '';
+      # A keyed overlay's imports stay imports, which `compose` walks
+      # before the importer; a keyless import among them gets a stable
+      # synthetic key derived from the importer key, so it keeps that
+      # position rather than falling into the keyless tail.
+      keyedImports =
+        key: imports:
+        builtins.genList (
+          i:
+          let
+            raw = checkShape (builtins.elemAt imports i);
+          in
+          if isKeyed raw then
+            byKey raw
+          else
+            let
+              synthetic = "${key}/imports/${toString i}";
+            in
+            raw
+            // {
+              key = synthetic;
+              imports = keyedImports synthetic (raw.imports or [ ]);
+            }
+        ) (builtins.length imports);
+      flattenOverlay =
+        raw:
+        let
+          overlay = byKey (checkShape raw);
+          imports = overlay.imports or [ ];
+        in
+        if isKeyed overlay then
+          [
+            {
+              inherit (overlay) key;
+              imports = keyedImports overlay.key imports;
+              overlay = overlay.overlay;
+            }
+          ]
+        else
+          let
+            keyless = builtins.filter (i: !(isKeyed i)) imports;
+            keyed = builtins.map byKey (builtins.filter isKeyed imports);
+          in
+          (builtins.concatMap flattenOverlay keyless)
+          ++ [
+            {
+              key = null;
+              imports = keyed;
+              overlay = overlay.overlay;
+            }
+          ];
     in
     overlays: (compose { entries = builtins.concatMap flattenOverlay overlays; }).lib;
 
