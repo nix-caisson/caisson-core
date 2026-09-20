@@ -428,6 +428,7 @@ let
             compose
             resolve
             importApply
+            callFlake
             callConsumerFlake
             partitionExtraInputs
             mkLib

@@ -477,6 +477,7 @@ let
       && builtins.isFunction composed.caisson-core.importApply
       && builtins.isFunction composed.caisson-core.compose
       && builtins.isFunction composed.caisson-core.resolve
+      && builtins.isFunction composed.caisson-core.callFlake
       && builtins.isFunction composed.caisson-core.callConsumerFlake
       && builtins.isFunction composed.caisson-core.partitionExtraInputs
       && composed.caisson-core.modules == { };
