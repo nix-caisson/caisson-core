@@ -29,6 +29,8 @@
   resolve,
   callFlake,
   partitionExtraInputs,
+  mkLibOverlays,
+  mkModules,
 }:
 
 let
@@ -54,10 +56,14 @@ let
   # key is published is read from the map, not from the value the
   # importer carried.
   composeRegistered =
-    { published ? { } }:
+    {
+      published ? { },
+    }:
     let
       isKeyed = overlay: (overlay.key or null) != null;
-      byKey = overlay: if isKeyed overlay && published ? ${overlay.key} then published.${overlay.key} else overlay;
+      byKey =
+        overlay:
+        if isKeyed overlay && published ? ${overlay.key} then published.${overlay.key} else overlay;
       checkShape =
         overlay:
         if (builtins.isAttrs overlay) && (builtins.hasAttr "overlay" overlay) then
@@ -159,17 +165,22 @@ let
   };
 
   # Build a composition-bound mkLibOverlay: everything passed to it
-  # takes the closure attrset, `{ closure-inputs, mkLibOverlay, ... }:`,
-  # as its first arg list, and returns an `{ imports ? [ ], overlay }`
+  # takes the closure attrset,
+  # `{ closure-inputs, closure-lib, mkLibOverlay, ... }:`, as its
+  # first arg list, and returns an `{ imports ? [ ], overlay }`
   # attrset.  Already-built overlays (e.g. another flake's exported
   # libOverlays) are registered directly rather than wrapped.
   mkLibOverlayFor =
     {
       inputs,
       # Extra attrs merged into the closure applied to overlay files;
-      # mkLib threads the composition's mkModule and the static
+      # mkLib threads the composed fixpoint (closure-lib, so an
+      # overlay's functions reach the registry of the composition that
+      # registered them), the composition's mkModule and the static
       # contributeModules helper through here so overlays can
-      # contribute modules closed over their own flake.
+      # contribute modules closed over their own flake. Bound lazily:
+      # an overlay reads them inside `overlay = final: prev:` or inside
+      # a function it defines, never while it is being registered.
       extraOverlayClosure ? { },
     }:
     let
@@ -196,9 +207,9 @@ let
               else
                 throw ''
                   ${provenance}mkLibOverlay expects a function taking the closure attrset
-                  (`{ closure-inputs, mkLibOverlay, ... }:`) as its first arg list, but got
-                  a ${builtins.typeOf reified}. Register already-built overlays directly
-                  instead of wrapping them in mkLibOverlay.
+                  (`{ closure-inputs, closure-lib, mkLibOverlay, ... }:`) as its first arg
+                  list, but got a ${builtins.typeOf reified}. Register already-built overlays
+                  directly instead of wrapping them in mkLibOverlay.
                 '';
           in
           if (builtins.isAttrs applied) && (builtins.hasAttr "overlay" applied) then
@@ -273,14 +284,35 @@ let
       };
     };
 
+  # Declare module classes from inside an overlay body, the way
+  # contributeModules contributes modules: `overlay = final: prev:
+  # contributeClasses prev { nixos = { integration = "nixos"; mkModule
+  # = final.caisson-core.mkModule "nixos"; }; } // { ... }`. The class
+  # index (`caisson-core.classes.<class>`) names, per class, the
+  # integration that owns it and the mkModule every reader registers
+  # that class through; a same-key declaration composed later
+  # replaces it, which is how an integration wrapping another takes
+  # over the class. Static like contributeModules, for the same
+  # reason.
+  contributeClasses =
+    prev: declarations:
+    let
+      prevClasses = (prev.caisson-core or { }).classes or { };
+    in
+    {
+      caisson-core = (prev.caisson-core or { }) // {
+        classes = prevClasses // declarations;
+      };
+    };
+
   # Build a composition-bound, class-parameterized mkModule.
-  # `selfModules` is the composing flake's own class-keyed
-  # registration set (for closure-self-modules); `finalLib` is the
-  # composed fixpoint (for closure-lib), bound lazily.
+  # `finalLib` is the composed fixpoint (for closure-lib), bound
+  # lazily; a module reaches the registry of the composition that
+  # registered it through closure-lib, under
+  # `caisson-core.modules.<class>`.
   mkModuleForComposition =
     {
       inputs,
-      selfModules ? { },
       finalLib,
     }:
     let
@@ -292,13 +324,12 @@ let
             inherit mkModule;
             closure-inputs = inputs;
             closure-lib = finalLib;
-            closure-self-modules = selfModules.${moduleClass} or { };
           };
         in
         freeformModule:
         (
           # Everything passed to mkModule takes the closure attrset as its first
-          # arg list: `{ closure-inputs, closure-lib, closure-self-modules, mkModule, ... }: <module>`.
+          # arg list: `{ closure-inputs, closure-lib, mkModule, ... }: <module>`.
           let
             applyClosure =
               m:
@@ -307,7 +338,7 @@ let
               else
                 throw ''
                   mkModule (class `${moduleClass}`) expects a module function taking the
-                  closure attrset (`{ closure-inputs, closure-lib, closure-self-modules, mkModule, ... }:`) as
+                  closure attrset (`{ closure-inputs, closure-lib, mkModule, ... }:`) as
                   its first arg list, but got a ${builtins.typeOf m}.
                 '';
             requiresImport = (builtins.isPath freeformModule) || (builtins.isString freeformModule);
@@ -408,10 +439,6 @@ let
   mkCoreOverlay =
     {
       inputs,
-      # The composing flake's class-keyed registrations, for
-      # closure-self-modules.  Empty for compositions with no
-      # registration phase.
-      selfModules ? { },
       # The published entries an overlay file may import from its
       # closure (`{ entries, ... }:`), the `nixpkgs-lib` entry among
       # them. Empty for compositions assembled without mkLib.
@@ -432,10 +459,12 @@ let
             callConsumerFlake
             partitionExtraInputs
             mkLib
+            mkLibOverlays
+            mkModules
             mkNixpkgsLibEntry
             ;
           mkModule = mkModuleForComposition {
-            inherit inputs selfModules;
+            inherit inputs;
             finalLib = final;
           };
           mkLibOverlay = mkLibOverlayFor {
@@ -444,8 +473,9 @@ let
             # modules do not force the composed fixpoint through
             # these.
             extraOverlayClosure = {
+              closure-lib = final;
               mkModule = final.caisson-core.mkModule;
-              inherit contributeModules entries;
+              inherit contributeClasses contributeModules entries;
             };
           };
           # Seed only: overlay contributions merge in during
@@ -453,6 +483,18 @@ let
           # a final overlay so the composing flake's own entries win
           # over contributed ones.
           modules = (prev.caisson-core or { }).modules or { };
+          # The class index: per class, the integration that owns it
+          # and the mkModule the class registers through. Each
+          # integration declares the class it owns (contributeClasses);
+          # the class-free `generic` class, whose modules any class may
+          # import, is declared here, since no integration owns it.
+          classes = {
+            generic = {
+              integration = "caisson-core";
+              mkModule = final.caisson-core.mkModule "generic";
+            };
+          }
+          // ((prev.caisson-core or { }).classes or { });
           # The configurations registry, filled by mkLib.
           configs = (prev.caisson-core or { }).configs or { };
           # The manifest slots, one per evaluation phase: the lib
@@ -499,7 +541,9 @@ let
         # before any evaluation names a host platform. Null when the
         # composition declares none.
         systems =
-          if rawSystems == null || (builtins.isList rawSystems && builtins.all builtins.isString rawSystems) then
+          if
+            rawSystems == null || (builtins.isList rawSystems && builtins.all builtins.isString rawSystems)
+          then
             rawSystems
           else
             throw ''
@@ -638,15 +682,15 @@ let
           inherit inputs;
           # Lazily bound, as in mkCoreOverlay.
           extraOverlayClosure = {
+            closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
-            inherit contributeModules;
+            inherit contributeClasses contributeModules;
             entries = publishedEntries;
           };
         };
 
         coreOverlay = mkCoreOverlay {
           inherit inputs;
-          selfModules = modules;
           entries = publishedEntries;
         };
 
@@ -769,13 +813,13 @@ let
       # the non-function case.
       builtins.seq (builtins.isFunction rawModules || modules) (
         builtins.seq (builtins.isFunction rawConfigs || configs) (
-        builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
-          builtins.seq (builtins.isAttrs rawEcosystems || defaultEcosystemSrc) (
-            builtins.seq (builtins.isAttrs rawProjects || projects) (
-              builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) finalLib
+          builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
+            builtins.seq (builtins.isAttrs rawEcosystems || defaultEcosystemSrc) (
+              builtins.seq (builtins.isAttrs rawProjects || projects) (
+                builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) finalLib
+              )
             )
           )
-        )
         )
       )
     );
@@ -784,6 +828,7 @@ in
 {
   inherit
     callConsumerFlake
+    contributeClasses
     contributeModules
     importApply
     mkCoreOverlay
