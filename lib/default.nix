@@ -153,6 +153,11 @@ let
   callFlake = import ./kernel/call-flake.nix;
   partitionExtraInputs = import ./kernel/partition-extra-inputs.nix;
 
+  # The directory readers: the registrations mkLib takes, derived from
+  # the conventional layout (`modules/<class>/<name>`,
+  # `lib-overlays/<name>`).  See the file's header.
+  readers = import ./readers.nix;
+
   # The library lifecycle: mkLib and the registration machinery, built
   # on `compose` above.  See its header for the contracts.
   lifecycle = import ./lifecycle.nix {
@@ -162,6 +167,7 @@ let
       partitionExtraInputs
       resolve
       ;
+    inherit (readers) mkLibOverlays mkModules;
   };
 
 in
@@ -172,6 +178,7 @@ in
     partitionExtraInputs
     resolve
     ;
+  inherit (readers) mkLibOverlays mkModules;
   inherit (lifecycle)
     callConsumerFlake
     contributeModules

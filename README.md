@@ -118,6 +118,21 @@ core.mkLib {
 }
 ```
 
+A tree laid out as `modules/<class>/<name>/default.nix`,
+`configs/<class>/<name>/default.nix` and
+`lib-overlays/<name>/default.nix` derives the three registrations
+from its directories: `modules = core.mkModules ./modules;`,
+`configs = core.mkModules ./configs;` and
+`libOverlays = core.mkLibOverlays ./lib-overlays;`. The readers apply
+`caisson-core.mkModule <class>` and `mkLibOverlay` to each entry
+directory; the first level of a modules directory is the class,
+whatever its name, so a class-free module directory (flake-parts'
+`generic`, say) and a class no integration covers read the same way. An
+entry is a directory holding a `default.nix`, a symlink to one
+included; anything else in a directory being read is an error, so a
+stray file cannot silently vanish from a registry. A tree with
+another layout writes the registrations by hand.
+
 Nothing is composed over. nixpkgs' library arrives as the published
 `nixpkgs-lib` entry, which imports the `lib` directory of the source
 supplying that part (`defaultEcosystemSrc.nixpkgs-lib`, else
@@ -134,12 +149,20 @@ those names like any registration, so a same-name registration
 replaces either.
 
 The composed library carries, under `caisson-core`: `mkLib`,
-`mkLibOverlay`, `mkModule` (class-parameterized),
-`mkNixpkgsLibEntry`, the class-keyed `modules` registry, the three
-manifest slots (`libManifest`, `pkgsManifest`, `evalManifest`), plus
-`compose`, `resolve`, `importApply`, `callConsumerFlake`, and
-`partitionExtraInputs`. Overlays contribute
-modules through their closure (`mkModule`, `contributeModules`); the
+`mkLibOverlay`, `mkModule` (class-parameterized), `mkModules`,
+`mkLibOverlays`, `mkNixpkgsLibEntry`, the class-keyed `modules`
+registry, the three manifest slots (`libManifest`, `pkgsManifest`,
+`evalManifest`), plus `compose`, `resolve`, `importApply`,
+`callConsumerFlake`, and `partitionExtraInputs`. A registered
+overlay file takes the closure attrset
+`{ closure-inputs, closure-lib, mkLibOverlay, mkModule, contributeModules, entries, ... }`
+as its first arg list and a registered module
+`{ closure-inputs, closure-lib, mkModule, ... }`; `closure-lib` is the
+composed library of the composition that registered the file, bound
+lazily, so an overlay's functions and a module reach that
+composition's registry under `caisson-core.modules.<class>` wherever
+they are later composed or evaluated. Overlays contribute modules
+through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
 same-named contributions. `mkCoreOverlay` exposes the same namespace
 injection as a built overlay for compositions assembled with

@@ -441,11 +441,12 @@ let
         };
       in
       composed.viaUpstream == 6
-      && builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-        "caisson-core"
-        "nixpkgs-lib"
-        "probe"
-      ];
+      &&
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
+          "caisson-core"
+          "nixpkgs-lib"
+          "probe"
+        ];
 
     lifecycleOverlayClosureCarriesInputs =
       let
@@ -480,7 +481,85 @@ let
       && builtins.isFunction composed.caisson-core.callFlake
       && builtins.isFunction composed.caisson-core.callConsumerFlake
       && builtins.isFunction composed.caisson-core.partitionExtraInputs
+      && builtins.isFunction composed.caisson-core.mkModules
+      && builtins.isFunction composed.caisson-core.mkLibOverlays
       && composed.caisson-core.modules == { };
+
+    lifecycleOverlayClosureCarriesLib =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          libOverlays = mkLibOverlay: {
+            marker = mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = "composed"; }; });
+            probe = mkLibOverlay (
+              { closure-lib, ... }:
+              {
+                overlay = _final: _prev: { probe = closure-lib.marker; };
+              }
+            );
+          };
+        };
+      in
+      composed.probe == "composed";
+
+    readersMkModulesReadsClassDirectories =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          modules = core.mkModules ./fixtures/modules-dir;
+        };
+        registry = composed.caisson-core.modules;
+        origin = m: (builtins.head m.imports).config.origin;
+      in
+      builtins.attrNames registry == [
+        "flake"
+        "generic"
+        "structural"
+      ]
+      && origin registry.flake.default == "flake-default"
+      && origin registry.generic.core == "generic-core"
+      # A symlinked entry registers under the class it sits in.
+      && origin registry.structural.core == "generic-core"
+      && registry.structural.core.key == builtins.toString ./fixtures/modules-dir/structural/core;
+
+    readersMkModulesRegistersConfigs =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          configs = core.mkModules ./fixtures/modules-dir;
+        };
+      in
+      (builtins.head composed.caisson-core.configs.flake.default.imports).config.origin
+      == "flake-default";
+
+    readersMkModulesRefusesAStrayFile = throws (
+      (core.mkModules ./fixtures/modules-dir-stray) { caisson-core.mkModule = _class: path: path; }
+    );
+
+    readersMkModulesRefusesAnEntryWithoutDefault = throws (
+      (core.mkModules ./fixtures/modules-dir-empty-entry) { caisson-core.mkModule = _class: path: path; }
+    );
+
+    readersMkLibOverlaysReadsEntries =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          libOverlays = core.mkLibOverlays ./fixtures/lib-overlays-dir;
+        };
+      in
+      composed.fromDefault
+      && composed.fromExtra
+      &&
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
+          "caisson-core"
+          "default"
+          "extra"
+          "nixpkgs-lib"
+        ];
+
+    readersMkLibOverlaysRefusesAStrayFile = throws (
+      (core.mkLibOverlays ./fixtures/lib-overlays-dir-stray) (path: path)
+    );
 
     lifecycleLocalModulesRegister =
       let
@@ -498,7 +577,9 @@ let
         composed = core.mkLib {
           inputs = { };
           configs = composedLib: {
-            structural.top = composedLib.caisson-core.mkModule "structural" ({ ... }: { config.origin = "top"; });
+            structural.top = composedLib.caisson-core.mkModule "structural" (
+              { ... }: { config.origin = "top"; }
+            );
           };
         };
       in
@@ -568,11 +649,12 @@ let
       && manifest.inputs == theInputs
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
-      && builtins.attrNames manifest.libOverlays == [
-        "a"
-        "caisson-core"
-        "nixpkgs-lib"
-      ]
+      &&
+        builtins.attrNames manifest.libOverlays == [
+          "a"
+          "caisson-core"
+          "nixpkgs-lib"
+        ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
 
@@ -604,14 +686,18 @@ let
       ];
 
     lifecycleSystemsMustBeAListOfStrings =
-      throws (core.mkLib {
-        inputs = { };
-        systems = "x86_64-linux";
-      })
-      && throws (core.mkLib {
-        inputs = { };
-        systems = [ 1 ];
-      });
+      throws (
+        core.mkLib {
+          inputs = { };
+          systems = "x86_64-linux";
+        }
+      )
+      && throws (
+        core.mkLib {
+          inputs = { };
+          systems = [ 1 ];
+        }
+      );
 
     lifecycleEcosystemDeclarationsJoinTheManifest =
       let
@@ -681,11 +767,12 @@ let
       && builtins.attrNames composed.caisson-core.libManifest.projects == [ "dep" ]
       # The manifest dictionaries carry the registered union, so the
       # export side sees project entries like hand-registered ones.
-      && builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-        "caisson-core"
-        "dep/greeter"
-        "nixpkgs-lib"
-      ]
+      &&
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
+          "caisson-core"
+          "dep/greeter"
+          "nixpkgs-lib"
+        ]
       && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "dep";
 
     lifecycleProjectOverlaysObeySelection =
@@ -715,12 +802,13 @@ let
       && !(composed ? fromDep)
       # Selection controls application only; the unselected project
       # overlay stays registered in the manifest dictionary.
-      && builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-        "caisson-core"
-        "dep/marker"
-        "local"
-        "nixpkgs-lib"
-      ];
+      &&
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
+          "caisson-core"
+          "dep/marker"
+          "local"
+          "nixpkgs-lib"
+        ];
 
     lifecycleLocalModulesBeatProjectModules =
       let
