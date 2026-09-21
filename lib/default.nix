@@ -181,6 +181,7 @@ in
   inherit (readers) mkLibOverlays mkModules;
   inherit (lifecycle)
     callConsumerFlake
+    contributeClasses
     contributeModules
     importApply
     mkCoreOverlay

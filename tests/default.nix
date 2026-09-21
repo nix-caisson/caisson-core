@@ -23,6 +23,25 @@ let
 
   throws = expr: !(builtins.tryEval (builtins.deepSeq expr true)).success;
 
+  # An overlay declaring the classes the modules-dir fixture holds
+  # besides `generic`, which caisson-core declares itself.
+  declaringClasses =
+    { contributeClasses, mkModule, ... }:
+    {
+      overlay =
+        _final: prev:
+        contributeClasses prev {
+          flake = {
+            integration = "test-flake";
+            mkModule = mkModule "flake";
+          };
+          structural = {
+            integration = "test-structural";
+            mkModule = mkModule "structural";
+          };
+        };
+    };
+
   results = {
 
     unionOfContributions =
@@ -507,6 +526,7 @@ let
         composed = core.mkLib {
           inputs = { };
           modules = core.mkModules ./fixtures/modules-dir;
+          libOverlays = mkLibOverlay: { classes = mkLibOverlay declaringClasses; };
         };
         registry = composed.caisson-core.modules;
         origin = m: (builtins.head m.imports).config.origin;
@@ -520,24 +540,74 @@ let
       && origin registry.generic.core == "generic-core"
       # A symlinked entry registers under the class it sits in.
       && origin registry.structural.core == "generic-core"
-      && registry.structural.core.key == builtins.toString ./fixtures/modules-dir/structural/core;
+      && registry.structural.core.key == builtins.toString ./fixtures/modules-dir/structural/core
+      && composed.caisson-core.classes.generic.integration == "caisson-core";
 
     readersMkModulesRegistersConfigs =
       let
         composed = core.mkLib {
           inputs = { };
           configs = core.mkModules ./fixtures/modules-dir;
+          libOverlays = mkLibOverlay: { classes = mkLibOverlay declaringClasses; };
         };
       in
       (builtins.head composed.caisson-core.configs.flake.default.imports).config.origin
       == "flake-default";
 
+    # The reader registers through the index, so an integration that
+    # declares a class again, composed later, wraps every module of
+    # the class.
+    readersMkModulesRegistersThroughTheClassIndex =
+      let
+        wrapping =
+          { contributeClasses, mkModule, ... }:
+          {
+            overlay =
+              _final: prev:
+              contributeClasses prev {
+                flake = {
+                  integration = "wrapper";
+                  mkModule = path: {
+                    wrapped = mkModule "flake" path;
+                  };
+                };
+              };
+          };
+        composed = core.mkLib {
+          inputs = { };
+          modules = core.mkModules ./fixtures/modules-dir;
+          libOverlays = mkLibOverlay: {
+            classes = mkLibOverlay declaringClasses;
+            wrapper = mkLibOverlay wrapping;
+          };
+          libOverlayImports = overlays: [
+            overlays.classes
+            overlays.wrapper
+          ];
+        };
+      in
+      composed.caisson-core.classes.flake.integration == "wrapper"
+      &&
+        (builtins.head composed.caisson-core.modules.flake.default.wrapped.imports).config.origin
+        == "flake-default";
+
+    readersMkModulesRefusesAnUndeclaredClass =
+      throws
+        (core.mkLib {
+          inputs = { };
+          modules = core.mkModules ./fixtures/modules-dir;
+        }).caisson-core.modules.flake;
+
     readersMkModulesRefusesAStrayFile = throws (
-      (core.mkModules ./fixtures/modules-dir-stray) { caisson-core.mkModule = _class: path: path; }
+      (core.mkModules ./fixtures/modules-dir-stray) {
+        caisson-core.classes.flake.mkModule = path: path;
+      }
     );
 
     readersMkModulesRefusesAnEntryWithoutDefault = throws (
-      (core.mkModules ./fixtures/modules-dir-empty-entry) { caisson-core.mkModule = _class: path: path; }
+      (core.mkModules ./fixtures/modules-dir-empty-entry) {
+        caisson-core.classes.flake.mkModule = path: path;
+      }
     );
 
     readersMkLibOverlaysReadsEntries =

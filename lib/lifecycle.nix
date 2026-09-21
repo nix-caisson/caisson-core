@@ -284,6 +284,27 @@ let
       };
     };
 
+  # Declare module classes from inside an overlay body, the way
+  # contributeModules contributes modules: `overlay = final: prev:
+  # contributeClasses prev { nixos = { integration = "nixos"; mkModule
+  # = final.caisson-core.mkModule "nixos"; }; } // { ... }`. The class
+  # index (`caisson-core.classes.<class>`) names, per class, the
+  # integration that owns it and the mkModule every reader registers
+  # that class through; a same-key declaration composed later
+  # replaces it, which is how an integration wrapping another takes
+  # over the class. Static like contributeModules, for the same
+  # reason.
+  contributeClasses =
+    prev: declarations:
+    let
+      prevClasses = (prev.caisson-core or { }).classes or { };
+    in
+    {
+      caisson-core = (prev.caisson-core or { }) // {
+        classes = prevClasses // declarations;
+      };
+    };
+
   # Build a composition-bound, class-parameterized mkModule.
   # `finalLib` is the composed fixpoint (for closure-lib), bound
   # lazily; a module reaches the registry of the composition that
@@ -454,7 +475,7 @@ let
             extraOverlayClosure = {
               closure-lib = final;
               mkModule = final.caisson-core.mkModule;
-              inherit contributeModules entries;
+              inherit contributeClasses contributeModules entries;
             };
           };
           # Seed only: overlay contributions merge in during
@@ -462,6 +483,18 @@ let
           # a final overlay so the composing flake's own entries win
           # over contributed ones.
           modules = (prev.caisson-core or { }).modules or { };
+          # The class index: per class, the integration that owns it
+          # and the mkModule the class registers through. Each
+          # integration declares the class it owns (contributeClasses);
+          # the class-free `generic` class, whose modules any class may
+          # import, is declared here, since no integration owns it.
+          classes = {
+            generic = {
+              integration = "caisson-core";
+              mkModule = final.caisson-core.mkModule "generic";
+            };
+          }
+          // ((prev.caisson-core or { }).classes or { });
           # The configurations registry, filled by mkLib.
           configs = (prev.caisson-core or { }).configs or { };
           # The manifest slots, one per evaluation phase: the lib
@@ -651,7 +684,7 @@ let
           extraOverlayClosure = {
             closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
-            inherit contributeModules;
+            inherit contributeClasses contributeModules;
             entries = publishedEntries;
           };
         };
@@ -795,6 +828,7 @@ in
 {
   inherit
     callConsumerFlake
+    contributeClasses
     contributeModules
     importApply
     mkCoreOverlay
