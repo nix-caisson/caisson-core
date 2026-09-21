@@ -23,6 +23,16 @@ let
 
   throws = expr: !(builtins.tryEval (builtins.deepSeq expr true)).success;
 
+  # The registry names of caisson-core's own entries, present in every
+  # mkLib composition.
+  coreNames = [
+    "caisson-core/compose"
+    "caisson-core/kernel"
+    "caisson-core/lifecycle"
+    "caisson-core/readers"
+    "caisson-core/resolve"
+  ];
+
   # An overlay declaring the classes the modules-dir fixture holds
   # besides `generic`, which caisson-core declares itself.
   declaringClasses =
@@ -461,8 +471,8 @@ let
       in
       composed.viaUpstream == 6
       &&
-        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-          "caisson-core"
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
+        ++ [
           "nixpkgs-lib"
           "probe"
         ];
@@ -620,8 +630,8 @@ let
       composed.fromDefault
       && composed.fromExtra
       &&
-        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-          "caisson-core"
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
+        ++ [
           "default"
           "extra"
           "nixpkgs-lib"
@@ -719,12 +729,7 @@ let
       && manifest.inputs == theInputs
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
-      &&
-        builtins.attrNames manifest.libOverlays == [
-          "a"
-          "caisson-core"
-          "nixpkgs-lib"
-        ]
+      && builtins.attrNames manifest.libOverlays == [ "a" ] ++ coreNames ++ [ "nixpkgs-lib" ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
 
@@ -838,8 +843,8 @@ let
       # The manifest dictionaries carry the registered union, so the
       # export side sees project entries like hand-registered ones.
       &&
-        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-          "caisson-core"
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
+        ++ [
           "dep/greeter"
           "nixpkgs-lib"
         ]
@@ -873,8 +878,8 @@ let
       # Selection controls application only; the unselected project
       # overlay stays registered in the manifest dictionary.
       &&
-        builtins.attrNames composed.caisson-core.libManifest.libOverlays == [
-          "caisson-core"
+        builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
+        ++ [
           "dep/marker"
           "local"
           "nixpkgs-lib"
@@ -909,20 +914,19 @@ let
       }
     );
 
-    lifecycleCoreOverlayComposesAsEntry =
+    # caisson-core is its own composition: the entries that make the
+    # top-level value are the ones mkLib composes into a consumer, so
+    # a composition assembled with `compose` directly takes them as
+    # keyed entries.
+    lifecycleCoreEntriesComposeDirectly =
       let
-        machinery = core.mkCoreOverlay { inputs = { }; };
-        r = compose {
-          entries = [
-            {
-              key = "test.machinery";
-              imports = [ ];
-              overlay = machinery.overlay;
-            }
-          ];
-        };
+        r = compose { entries = builtins.attrValues (core.coreEntries { inputs = { }; }); };
       in
-      builtins.isFunction r.lib.caisson-core.mkLibOverlay && r.lib.caisson-core.modules == { };
+      builtins.isFunction r.lib.caisson-core.mkLibOverlay
+      && builtins.isFunction r.lib.caisson-core.mkLib
+      && r.lib.caisson-core.modules == { }
+      && r.meta.order == coreNames
+      && builtins.attrNames r.lib.caisson-core == builtins.attrNames core;
 
   };
 

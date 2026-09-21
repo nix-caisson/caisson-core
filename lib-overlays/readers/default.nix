@@ -29,10 +29,7 @@
 # index is what lets an integration that wraps another (declaring the
 # same class later, with its own mkModule) see every module of the
 # class. A tree with another layout registers by hand.
-#
-# This file uses builtins only, on purpose.  Nothing here may
-# reference nixpkgs' lib (or any other library).
-
+{ ... }:
 let
 
   # The subdirectories of `dir`, name -> path; any other entry throws.
@@ -94,5 +91,9 @@ let
 
 in
 {
-  inherit mkModules mkLibOverlays;
+  overlay = _final: prev: {
+    caisson-core = (prev.caisson-core or { }) // {
+      inherit mkModules mkLibOverlays;
+    };
+  };
 }
