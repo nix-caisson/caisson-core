@@ -493,6 +493,27 @@ let
       in
       composed.caisson-core.modules.nixos.local.config.origin == "local";
 
+    lifecycleConfigsRegister =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          configs = composedLib: {
+            structural.top = composedLib.caisson-core.mkModule "structural" ({ ... }: { config.origin = "top"; });
+          };
+        };
+      in
+      composed.caisson-core.configs.structural.top.config.origin == "top"
+      && composed.caisson-core.libManifest.configs.structural.top.config.origin == "top"
+      && (core.mkLib { inputs = { }; }).caisson-core.configs == { };
+
+    lifecycleConfigsRefusesNonFunction =
+      !(builtins.tryEval (
+        builtins.seq (core.mkLib {
+          inputs = { };
+          configs = { };
+        }) true
+      )).success;
+
     lifecycleOverlayContributionsMergeAndLocalsWin =
       let
         contributor =
@@ -536,6 +557,7 @@ let
         manifest = composed.caisson-core.libManifest;
       in
       builtins.attrNames manifest == [
+        "configs"
         "defaultEcosystemSrc"
         "inputs"
         "libOverlays"
