@@ -16,8 +16,8 @@ jobs:
           determinate: false
       - name: builtins-only lint
         run: |
-          if grep -RnE '(^|[^a-zA-Z_.])(lib|pkgs)[.]' lib; then
-            echo "lib/ may reference nothing but builtins" >&2
+          if grep -RnE '(^|[^a-zA-Z_.])(lib|pkgs)[.]' lib lib-overlays; then
+            echo "lib/ and lib-overlays/ may reference nothing but builtins" >&2
             exit 1
           fi
       - run: nix flake check -L

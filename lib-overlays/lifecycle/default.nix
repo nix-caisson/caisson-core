@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: MIT
 #
 # The library lifecycle: building a composed library from registered
-# overlays and modules over the empty seed, and injecting the
-# `caisson-core` namespace (machinery, registry, manifest) into the
-# result.  mkLib is the entry point; mkCoreOverlay is the same
-# injection as a standalone entry for compositions assembled
-# with `compose` directly.
+# overlays and modules over the empty seed, with the `caisson-core`
+# namespace (machinery, registries, manifest) composed into the result
+# from caisson-core's own entries. mkLib is the entry point.
 #
 # Contracts, shared with `compose`:
 #
@@ -16,38 +14,32 @@
 #     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or an input
 #     named exactly so, through `resolve`; a miss is null, and the
 #     entry names the declaration only where it is composed.
-#   - Only this file puts things into the composed library's
-#     `caisson-core` namespace.  The manifest (the capture of what
-#     mkLib consumed) enters through composition as a synthetic
-#     final overlay, the same channel as everything else.
+#   - The `caisson-core` namespace is contributed by caisson-core's own
+#     entries and nothing else.  The manifest (the capture of what
+#     mkLib consumed) enters through composition as a synthetic final
+#     overlay, the same channel as everything else.
 #
-# This file uses builtins only, on purpose.  Nothing here may
-# reference nixpkgs' library (or any other library).
-
+# This overlay takes the bootstrap closure of caisson-core's own
+# entries: the inputs this composition closes over, the entries it
+# publishes (`nixpkgs-lib`, in a composition mkLib builds), `compose`
+# and `coreEntries`, the function that makes these entries for a
+# composition. It uses builtins only, on purpose.
 {
+  closure-inputs,
+  entries,
   compose,
-  resolve,
-  callFlake,
-  partitionExtraInputs,
-  mkLibOverlays,
-  mkModules,
+  coreEntries,
+  ...
 }:
-
 let
 
-  # Use a list of built overlays (`{ imports, overlay }` attrsets,
-  # imports applied before the overlay itself) to extend a base
-  # library.  The chain is flattened depth-first, imports before self,
-  # duplicates preserved, and applied as anonymous entries over the
-  # base.  The order is part of the contract: an overlay may rely on
-  # its imports having applied before it.
   # Compose registered overlays into a library. The seed is the empty
   # attribute set: nothing is composed over, and everything a library
   # holds arrives as an entry. A keyed overlay keeps its key, so
   # `compose` deduplicates it and a same-key overlay registered later
   # replaces it; a keyless overlay joins the tail in list order.
-  # Keyless imports are flattened in front of their importer as
-  # before; keyed imports stay imports, which `compose` walks.
+  # Keyless imports are flattened in front of their importer; keyed
+  # imports stay imports, which `compose` walks.
   #
   # `published` maps a key to the entry the composing tree holds under
   # it. An import addresses a stable identity, so an overlay built in
@@ -174,13 +166,13 @@ let
     {
       inputs,
       # Extra attrs merged into the closure applied to overlay files;
-      # mkLib threads the composed fixpoint (closure-lib, so an
-      # overlay's functions reach the registry of the composition that
-      # registered them), the composition's mkModule and the static
-      # contributeModules helper through here so overlays can
-      # contribute modules closed over their own flake. Bound lazily:
-      # an overlay reads them inside `overlay = final: prev:` or inside
-      # a function it defines, never while it is being registered.
+      # the composed fixpoint (closure-lib, so an overlay's functions
+      # reach the registry of the composition that registered them),
+      # the composition's mkModule and the static contribute helpers
+      # arrive through here so overlays can contribute modules and
+      # classes closed over their own flake. Bound lazily: an overlay
+      # reads them inside `overlay = final: prev:` or inside a
+      # function it defines, never while it is being registered.
       extraOverlayClosure ? { },
     }:
     let
@@ -358,157 +350,6 @@ let
     in
     mkModuleClass;
 
-  # Evaluate a consumer-style flake from source with explicitly
-  # supplied inputs. The flake's declared inputs resolve by name:
-  # `overrides` first, then `follows` chains through the other
-  # resolved inputs, then `pool`; anything else throws, naming the
-  # input. The self fixpoint and decoration (`inputs`, `outputs`,
-  # `outPath`, `_type`) are handled by the shared call-flake kernel.
-  # Nothing is fetched: URL-declared inputs must
-  # be supplied (test-only pins conventionally come from a
-  # tests/dependencies flake). Locks, follows across unsupplied
-  # inputs, and sourceInfo are not consulted or emulated.
-  callConsumerFlake =
-    {
-      path,
-      pool ? { },
-      overrides ? { },
-      # forwarded to the self attrset for subjects that read
-      # sourceInfo attrs (lastModified, rev, ...)
-      sourceInfo ? { },
-    }:
-    let
-      flakeExpr = import (path + "/flake.nix");
-      declared = flakeExpr.inputs or { };
-
-      segments = s: builtins.filter (x: builtins.isString x && x != "") (builtins.split "/" s);
-
-      missingFor =
-        name: spec:
-        throw ''
-          callConsumerFlake: input `${name}` of ${builtins.toString path} is declared
-          as ${
-            if (builtins.isAttrs spec) && (spec ? follows) then
-              "`follows = \"${spec.follows}\"`"
-            else if (builtins.isAttrs spec) && (spec ? url) then
-              "`url = \"${spec.url}\"`"
-            else
-              "an input"
-          } but could not be resolved. Supply it via `pool` or `overrides`;
-          nothing is fetched here.
-        '';
-
-      followsOrPool =
-        name: followsPath:
-        let
-          segs = segments followsPath;
-          headName = builtins.head segs;
-          base =
-            if builtins.hasAttr headName resolvedDeclared then
-              resolvedDeclared.${headName}
-            else
-              pool.${headName} or null;
-          step = acc: seg: if acc == null then null else ((acc.inputs or { }).${seg} or null);
-          followed = builtins.foldl' step base (builtins.tail segs);
-        in
-        if followed != null then followed else pool.${name} or (missingFor name { follows = followsPath; });
-
-      resolveName =
-        name: spec:
-        if builtins.hasAttr name overrides then
-          overrides.${name}
-        else if (builtins.isAttrs spec) && (spec ? follows) then
-          followsOrPool name spec.follows
-        else
-          pool.${name} or (missingFor name spec);
-
-      resolvedDeclared = builtins.mapAttrs resolveName declared;
-    in
-    callFlake {
-      src = path;
-      inputs = resolvedDeclared // overrides;
-      inherit sourceInfo;
-    };
-
-  # The `caisson-core` namespace injection as a built overlay: the
-  # machinery bound to one composition.  mkLib applies it first; a
-  # consumer composing entries directly can apply it as (part
-  # of) a keyed entry.  The registry seed preserves anything already
-  # contributed; local registrations win because mkLib applies them
-  # after every imported overlay.
-  mkCoreOverlay =
-    {
-      inputs,
-      # The published entries an overlay file may import from its
-      # closure (`{ entries, ... }:`), the `nixpkgs-lib` entry among
-      # them. Empty for compositions assembled without mkLib.
-      entries ? { },
-    }:
-    {
-      # The core entry: registered under this key like any entry, so
-      # the registry shows it and a same-key entry replaces it.
-      key = "caisson-core";
-      imports = [ ];
-      overlay = final: prev: {
-        caisson-core = (prev.caisson-core or { }) // {
-          inherit
-            compose
-            resolve
-            importApply
-            callFlake
-            callConsumerFlake
-            partitionExtraInputs
-            mkLib
-            mkLibOverlays
-            mkModules
-            mkNixpkgsLibEntry
-            ;
-          mkModule = mkModuleForComposition {
-            inherit inputs;
-            finalLib = final;
-          };
-          mkLibOverlay = mkLibOverlayFor {
-            inherit inputs;
-            # Lazily bound, so overlay files that contribute no
-            # modules do not force the composed fixpoint through
-            # these.
-            extraOverlayClosure = {
-              closure-lib = final;
-              mkModule = final.caisson-core.mkModule;
-              inherit contributeClasses contributeModules entries;
-            };
-          };
-          # Seed only: overlay contributions merge in during
-          # composition, and mkLib applies the local registrations as
-          # a final overlay so the composing flake's own entries win
-          # over contributed ones.
-          modules = (prev.caisson-core or { }).modules or { };
-          # The class index: per class, the integration that owns it
-          # and the mkModule the class registers through. Each
-          # integration declares the class it owns (contributeClasses);
-          # the class-free `generic` class, whose modules any class may
-          # import, is declared here, since no integration owns it.
-          classes = {
-            generic = {
-              integration = "caisson-core";
-              mkModule = final.caisson-core.mkModule "generic";
-            };
-          }
-          // ((prev.caisson-core or { }).classes or { });
-          # The configurations registry, filled by mkLib.
-          configs = (prev.caisson-core or { }).configs or { };
-          # The manifest slots, one per evaluation phase: the lib
-          # (filled by mkLib), the package set (filled on the lib
-          # inside a package set) and the module evaluation (filled on
-          # the lib an evaluation is built with). All three are present
-          # on every composed library and null until filled.
-          libManifest = (prev.caisson-core or { }).libManifest or null;
-          pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
-          evalManifest = (prev.caisson-core or { }).evalManifest or null;
-        };
-      };
-    };
-
   mkLib =
     rawArgs:
     (
@@ -619,6 +460,10 @@ let
         # null when nothing declares it.
         nixpkgsLibSource =
           let
+            # The plain function rather than the one in the composed
+            # library: the source decides what the fixpoint holds, so
+            # it cannot be read out of the fixpoint.
+            resolve = import ../resolve/resolve.nix;
             fromPart = resolve {
               name = "nixpkgs-lib";
               defaults = defaultEcosystemSrc;
@@ -678,9 +523,12 @@ let
               already-built overlays.
             '';
 
+        # The same construction as the composition's own
+        # `caisson-core.mkLibOverlay`, bound before the fixpoint
+        # exists: the registered overlay set is what the fixpoint is
+        # built from, so it cannot be read back out of it.
         mkLibOverlayHere = mkLibOverlayFor {
           inherit inputs;
-          # Lazily bound, as in mkCoreOverlay.
           extraOverlayClosure = {
             closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
@@ -689,7 +537,8 @@ let
           };
         };
 
-        coreOverlay = mkCoreOverlay {
+        # caisson-core's own entries, bound to this composition.
+        coreOverlays = coreEntries {
           inherit inputs;
           entries = publishedEntries;
         };
@@ -704,29 +553,26 @@ let
         # each export a `default`), so registering under a published
         # name replaces that entry wherever it is composed.
         registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
-          {
-            caisson-core = coreOverlay;
+          coreOverlays
+          // {
             nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource;
           }
           // projectLibOverlays
           // libOverlays
         );
 
-        # The selection: the core entry is always composed and first;
-        # the rest is what `libOverlayImports` selects from the
+        # The selection: caisson-core's entries are always composed and
+        # first; the rest is what `libOverlayImports` selects from the
         # registry's project and local entries. The published entries
         # are not selectable: `nixpkgs-lib` is composed wherever an
         # overlay imports it, and nowhere otherwise. `compose`
         # deduplicates by key, so an entry imported twice composes
         # once.
-        publishedNames = [
-          "caisson-core"
-          "nixpkgs-lib"
-        ];
-        importedLibOverlays = [
-          registeredLibOverlays.caisson-core
-        ]
-        ++ libOverlayImports (builtins.removeAttrs registeredLibOverlays publishedNames);
+        coreNames = builtins.attrNames coreOverlays;
+        publishedNames = coreNames ++ [ "nixpkgs-lib" ];
+        importedLibOverlays =
+          builtins.map (name: registeredLibOverlays.${name}) coreNames
+          ++ libOverlayImports (builtins.removeAttrs registeredLibOverlays publishedNames);
 
         # Consumed projects' modules enter the registry like overlay
         # contributions: available to every selection, beaten by a
@@ -763,10 +609,8 @@ let
         # name collision), so export selections drawn from the
         # manifest see project-borne entries exactly like
         # hand-registered ones; `projects` keeps the raw per-project
-        # capture.  The injector is internal and appears in neither
-        # dictionary, so the only cycles run through function
-        # closures, which no traversal enters.  Checks belong to the
-        # export side (integrations), not here.
+        # capture.  Checks belong to the export side (integrations),
+        # not here.
         manifestOverlay = {
           imports = [ ];
           overlay = _final: prev: {
@@ -826,14 +670,58 @@ let
 
 in
 {
-  inherit
-    callConsumerFlake
-    contributeClasses
-    contributeModules
-    importApply
-    mkCoreOverlay
-    mkExtendedLib
-    mkLib
-    mkNixpkgsLibEntry
-    ;
+  overlay = final: prev: {
+    caisson-core = (prev.caisson-core or { }) // {
+      inherit
+        contributeClasses
+        contributeModules
+        coreEntries
+        importApply
+        mkExtendedLib
+        mkLib
+        mkNixpkgsLibEntry
+        ;
+      mkModule = mkModuleForComposition {
+        inputs = closure-inputs;
+        finalLib = final;
+      };
+      mkLibOverlay = mkLibOverlayFor {
+        inputs = closure-inputs;
+        # Lazily bound, so overlay files that contribute no modules do
+        # not force the composed fixpoint through these.
+        extraOverlayClosure = {
+          closure-lib = final;
+          mkModule = final.caisson-core.mkModule;
+          inherit contributeClasses contributeModules entries;
+        };
+      };
+      # Seed only: overlay contributions merge in during composition,
+      # and mkLib applies the local registrations as a final overlay
+      # so the composing flake's own entries win over contributed
+      # ones.
+      modules = (prev.caisson-core or { }).modules or { };
+      # The class index: per class, the integration that owns it and
+      # the mkModule the class registers through. Each integration
+      # declares the class it owns (contributeClasses); the class-free
+      # `generic` class, whose modules any class may import, is
+      # declared here, since no integration owns it.
+      classes = {
+        generic = {
+          integration = "caisson-core";
+          mkModule = final.caisson-core.mkModule "generic";
+        };
+      }
+      // ((prev.caisson-core or { }).classes or { });
+      # The configurations registry, filled by mkLib.
+      configs = (prev.caisson-core or { }).configs or { };
+      # The manifest slots, one per evaluation phase: the lib (filled
+      # by mkLib), the package set (filled on the lib inside a package
+      # set) and the module evaluation (filled on the lib an
+      # evaluation is built with). All three are present on every
+      # composed library and null until filled.
+      libManifest = (prev.caisson-core or { }).libManifest or null;
+      pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
+      evalManifest = (prev.caisson-core or { }).evalManifest or null;
+    };
+  };
 }

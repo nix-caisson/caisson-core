@@ -1,7 +1,16 @@
 # SPDX-License-Identifier: MIT
 #
-# caisson-core: composes library overlays with identity, replacement,
-# and deterministic order.
+# caisson-core, composed from its own entries.
+#
+# `compose` below is the one primitive: keyed overlay composition with
+# identity, replacement and deterministic order, over plain builtins.
+# Everything else caisson-core exports is an ordinary library overlay
+# under lib-overlays/<name>/default.nix, composed here over the empty
+# seed into the `caisson-core` namespace. mkLib composes the same
+# entries into every consumer's library, so `import caisson-core` and
+# `caisson-core` inside a composed library are one definition, and
+# each part is a registered entry (`caisson-core/<name>`), replaceable
+# by a same-key entry like any other.
 #
 # An entry is an attribute set:
 #
@@ -32,8 +41,8 @@
 #   - An overlay's output attribute NAMES must not depend on `final`;
 #     a fixpoint whose attribute names depend on itself diverges.
 #
-# This file uses builtins only, on purpose.  Nothing here may
-# reference nixpkgs' lib (or any other library).
+# This file and the overlays use builtins only, on purpose.  Nothing
+# here may reference nixpkgs' library (or any other library).
 
 let
 
@@ -125,68 +134,48 @@ let
       };
     };
 
-  # Layered ecosystem-source resolution.  It can never throw or
-  # format a message, because a full miss is the interpretable value
-  # null, left to the caller to interpret.  Priority: the explicit argument,
-  # then the client's declared defaults, then an input with exactly
-  # the declared name.
-  resolve =
+  # The overlays caisson-core is made of, in composition order.
+  names = [
+    "compose"
+    "resolve"
+    "kernel"
+    "lifecycle"
+    "readers"
+  ];
+
+  # The keyed entries of caisson-core, bound to one composition: the
+  # inputs the composition closes over and the entries it publishes
+  # (the `nixpkgs-lib` entry, in a composition mkLib builds). Each
+  # overlay file takes the closure
+  # `{ closure-inputs, entries, compose, coreEntries, ... }` and
+  # returns `{ imports ? [ ], overlay }`, the shape mkLibOverlay
+  # produces; the closure is applied here by hand, since mkLibOverlay
+  # is itself one of the things being composed.
+  coreEntries =
     {
-      name,
-      explicit ? null,
-      defaults ? { },
       inputs ? { },
+      entries ? { },
     }:
-    if explicit != null then
-      explicit
-    else if builtins.hasAttr name defaults then
-      defaults.${name}
-    else if builtins.hasAttr name inputs then
-      inputs.${name}
-    else
-      null;
-
-  # The kernel: minimal flake-output wiring over explicitly provided,
-  # already-wired inputs (no lock handling, no fetching), and the
-  # read-only-eval-safe partition extra-inputs loader.  Both files are
-  # self-contained on purpose; see their headers.
-  callFlake = import ./kernel/call-flake.nix;
-  partitionExtraInputs = import ./kernel/partition-extra-inputs.nix;
-
-  # The directory readers: the registrations mkLib takes, derived from
-  # the conventional layout (`modules/<class>/<name>`,
-  # `lib-overlays/<name>`).  See the file's header.
-  readers = import ./readers.nix;
-
-  # The library lifecycle: mkLib and the registration machinery, built
-  # on `compose` above.  See its header for the contracts.
-  lifecycle = import ./lifecycle.nix {
-    inherit
-      callFlake
-      compose
-      partitionExtraInputs
-      resolve
-      ;
-    inherit (readers) mkLibOverlays mkModules;
-  };
+    builtins.listToAttrs (
+      builtins.map (
+        name:
+        let
+          key = "caisson-core/${name}";
+          applied = import (../lib-overlays + "/${name}") {
+            closure-inputs = inputs;
+            inherit entries compose coreEntries;
+          };
+        in
+        {
+          name = key;
+          value = {
+            inherit key;
+            imports = applied.imports or [ ];
+            overlay = applied.overlay;
+          };
+        }
+      ) names
+    );
 
 in
-{
-  inherit
-    callFlake
-    compose
-    partitionExtraInputs
-    resolve
-    ;
-  inherit (readers) mkLibOverlays mkModules;
-  inherit (lifecycle)
-    callConsumerFlake
-    contributeClasses
-    contributeModules
-    importApply
-    mkCoreOverlay
-    mkExtendedLib
-    mkLib
-    mkNixpkgsLibEntry
-    ;
-}
+(compose { entries = builtins.attrValues (coreEntries { }); }).lib.caisson-core

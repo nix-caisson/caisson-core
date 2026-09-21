@@ -172,9 +172,18 @@ composition's registry under `caisson-core.modules.<class>` wherever
 they are later composed or evaluated. Overlays contribute modules
 through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
-same-named contributions. `mkCoreOverlay` exposes the same namespace
-injection as a built overlay for compositions assembled with
-`compose` directly.
+same-named contributions.
+
+caisson-core is its own composition. `lib/default.nix` holds the one
+primitive, `compose`, and composes the overlays under
+`lib-overlays/<name>/default.nix` (`compose`, `resolve`, `kernel`,
+`lifecycle`, `readers`) over the empty seed into the `caisson-core`
+namespace; `mkLib` composes the same entries into every consumer's
+library, keyed `caisson-core/<name>`, so `import caisson-core` and
+`caisson-core` inside a composed library are one definition and each
+part is a registered entry a same-key entry replaces. `coreEntries
+{ inputs, entries }` returns those entries for a composition assembled
+with `compose` directly.
 
 A `projects` value is an attrset with `libOverlays` and class-keyed
 `modules` dictionaries, the outputs a flake built on this machinery
