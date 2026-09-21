@@ -453,6 +453,8 @@ let
           # a final overlay so the composing flake's own entries win
           # over contributed ones.
           modules = (prev.caisson-core or { }).modules or { };
+          # The configurations registry, filled by mkLib.
+          configs = (prev.caisson-core or { }).configs or { };
           # The manifest slots, one per evaluation phase: the lib
           # (filled by mkLib), the package set (filled on the lib
           # inside a package set) and the module evaluation (filled on
@@ -478,6 +480,7 @@ let
           '');
 
         rawModules = resolvedArgs.modules or (composedLib: { });
+        rawConfigs = resolvedArgs.configs or (composedLib: { });
         rawLibOverlays = resolvedArgs.libOverlays or (mkLibOverlay: { });
         libOverlayImports = resolvedArgs.libOverlayImports or (overlays: builtins.attrValues overlays);
         rawEcosystems =
@@ -605,6 +608,20 @@ let
               the argument and ignore it (`_composedLib: { ... }`) if you do not need
               it.
             '';
+        # The configurations of this tree, keyed by module class then
+        # name (`configs/<class>/<name>` on disk): the modules a top
+        # evaluates and a configuration evaluates beneath itself,
+        # referenced by name rather than by path. Local registrations
+        # only; consumed projects contribute none.
+        configs =
+          if builtins.isFunction rawConfigs then
+            rawConfigs finalLib
+          else
+            throw ''
+              mkLib expects `configs` to be a function taking the composed
+              library (`lib: { ... }`), but got a ${builtins.typeOf rawConfigs}. Take
+              the argument and ignore it (`_lib: { ... }`) if you do not need it.
+            '';
         libOverlays =
           if builtins.isFunction rawLibOverlays then
             rawLibOverlays mkLibOverlayHere
@@ -710,8 +727,10 @@ let
           imports = [ ];
           overlay = _final: prev: {
             caisson-core = (prev.caisson-core or { }) // {
+              inherit configs;
               libManifest = {
                 inherit
+                  configs
                   defaultEcosystemSrc
                   inputs
                   projects
@@ -749,12 +768,14 @@ let
       # forced first. `||` only forces the throw-carrying binding in
       # the non-function case.
       builtins.seq (builtins.isFunction rawModules || modules) (
+        builtins.seq (builtins.isFunction rawConfigs || configs) (
         builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
           builtins.seq (builtins.isAttrs rawEcosystems || defaultEcosystemSrc) (
             builtins.seq (builtins.isAttrs rawProjects || projects) (
               builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) finalLib
             )
           )
+        )
         )
       )
     );

@@ -107,12 +107,14 @@ core.mkLib {
                           # exact name; `nixpkgs` supplies the nixpkgs-lib
                           # part unless `nixpkgs-lib` names its own source
   modules = composedLib: { };         # class-keyed local registrations
+  configs = composedLib: { };         # class-keyed configurations
+                                      # (configs/<class>/<name>)
   libOverlays = mkLibOverlay: { };    # named overlay registrations
   libOverlayImports = builtins.attrValues;  # selection for this library
   projects = { };                     # consumed upstream contributions,
                                       # by project name
-  systems = [ "x86_64-linux" ];       # the platforms the tree builds on,
-                                      # declared once; null when absent
+  systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
+                                      # null when absent
 }
 ```
 
@@ -151,8 +153,10 @@ and a local registration wins a name collision.
 
 The manifest is the composition's self-description, recorded at
 `caisson-core.libManifest`: `inputs`, `defaultEcosystemSrc`,
-`systems`, the raw `projects` capture, and the registered `libOverlays` and
-`modules` dictionaries (project entries prefixed, locals winning). It
+`systems`, the raw `projects` capture, the registered `libOverlays` and
+`modules` dictionaries (project entries prefixed, locals winning), and
+the `configs` registration, which also comes back as
+`caisson-core.configs`. It
 is not passed anywhere; readers pull it back out of the composed
 library. There is a slot per evaluation phase: `libManifest` is
 filled here, and `pkgsManifest` and `evalManifest` are present and
