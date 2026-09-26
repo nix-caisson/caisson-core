@@ -723,12 +723,14 @@ let
         "inputs"
         "libOverlays"
         "modules"
+        "namespace"
         "projects"
         "systems"
       ]
       && manifest.inputs == theInputs
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
+      && manifest.namespace == null
       && builtins.attrNames manifest.libOverlays == [ "a" ] ++ coreNames ++ [ "nixpkgs-lib" ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
@@ -771,6 +773,37 @@ let
         core.mkLib {
           inputs = { };
           systems = [ 1 ];
+        }
+      );
+
+    lifecycleNamespaceIsDeclaredOnMkLib =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          namespace = "my-project";
+        };
+      in
+      composed.caisson-core.libManifest.namespace == "my-project";
+
+    lifecycleNamespaceIsAbsentWhenUndeclared =
+      let
+        composed = core.mkLib {
+          inputs = { };
+        };
+      in
+      composed.caisson-core.libManifest.namespace == null;
+
+    lifecycleNamespaceMustBeAString =
+      throws (
+        core.mkLib {
+          inputs = { };
+          namespace = [ "my-project" ];
+        }
+      )
+      && throws (
+        core.mkLib {
+          inputs = { };
+          namespace = 1;
         }
       );
 

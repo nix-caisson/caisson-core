@@ -115,6 +115,9 @@ core.mkLib {
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
                                       # null when absent
+  namespace = "my-project";           # the namespace this composition
+                                      # contributes to the composed library;
+                                      # null when absent
 }
 ```
 
@@ -193,10 +196,14 @@ and a local registration wins a name collision.
 
 The manifest is the composition's self-description, recorded at
 `caisson-core.libManifest`: `inputs`, `defaultEcosystemSrc`,
-`systems`, the raw `projects` capture, the registered `libOverlays` and
-`modules` dictionaries (project entries prefixed, locals winning), and
-the `configs` registration, which also comes back as
-`caisson-core.configs`. It
+`systems`, `namespace`, the raw `projects` capture, the registered
+`libOverlays` and `modules` dictionaries (project entries prefixed,
+locals winning), and the `configs` registration, which also comes back
+as `caisson-core.configs`. `namespace` is the name the composition
+holds for itself, the namespace its overlays contribute to the
+composed library; a layer above gives a configuration no parent
+declares that name, since a name is otherwise the attribute a parent
+declares a child under. It
 is not passed anywhere; readers pull it back out of the composed
 library. There is a slot per evaluation phase: `libManifest` is
 filled here, and `pkgsManifest` and `evalManifest` are present and
