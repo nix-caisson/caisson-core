@@ -376,6 +376,7 @@ let
             resolvedArgs.defaultEcosystemSrc or { };
         rawProjects = resolvedArgs.projects or { };
         rawSystems = resolvedArgs.systems or null;
+        rawNamespace = resolvedArgs.namespace or null;
 
         # The platforms the tree builds on, declared once here and
         # read from the manifest by whatever needs a system list
@@ -390,6 +391,24 @@ let
             throw ''
               mkLib expects `systems` to be a list of system strings (e.g.
               `[ "x86_64-linux" ]`), but got a ${builtins.typeOf rawSystems}.
+            '';
+
+        # The namespace this composition contributes to the composed
+        # library: the one name the tree holds for itself, declared
+        # once here and read from the manifest. A configuration no
+        # parent declares takes it as its name, since a name is
+        # otherwise the attribute a parent declares a child under and
+        # a parentless evaluation has no such attribute. Null when the
+        # composition declares none, which leaves such a configuration
+        # unnamed.
+        namespace =
+          if rawNamespace == null || builtins.isString rawNamespace then
+            rawNamespace
+          else
+            throw ''
+              mkLib expects `namespace` to be the string naming the namespace this
+              composition contributes to the composed library (e.g. `"my-project"`,
+              read as `lib.my-project`), but got a ${builtins.typeOf rawNamespace}.
             '';
 
         # Consumed projects: whole upstream contributions, registered
@@ -621,6 +640,7 @@ let
                   configs
                   defaultEcosystemSrc
                   inputs
+                  namespace
                   projects
                   systems
                   ;
@@ -660,7 +680,9 @@ let
           builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
             builtins.seq (builtins.isAttrs rawEcosystems || defaultEcosystemSrc) (
               builtins.seq (builtins.isAttrs rawProjects || projects) (
-                builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) finalLib
+                builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) (
+                  builtins.seq (rawNamespace == null || builtins.isString rawNamespace || namespace) finalLib
+                )
               )
             )
           )
