@@ -141,6 +141,7 @@ let
     "kernel"
     "lifecycle"
     "readers"
+    "pins"
   ];
 
   # The keyed entries of caisson-core, bound to one composition: the

@@ -230,6 +230,39 @@ Two self-contained companions ship alongside `compose`:
 Both keep the builtins-only rule; the vendored flake-compat carries
 its own license and provenance header.
 
+## Pin readers
+
+A tree is built from pinned sources. `pins` holds a reader per pin
+system, each reading that system's files into `sources`: every pinned
+tree, as the pin system hands it over (a flake input keeps its
+outputs), plus `pin`, the record of how it is pinned (`system`, the
+pin `files`, `url`, `rev`, `narHash`, `lastModified`).
+
+```nix
+# In a flake's outputs: the inputs Nix resolved, with any
+# --override-input in force, and the root from `self`.
+inherit (caisson-core.pins.flake inputs) sources root;
+
+# A flake.nix and flake.lock pair Nix's flake evaluator does not see,
+# such as a tests/dependencies directory, resolved the way
+# flake-compat does. Nothing overrides it and it has no root.
+inherit (caisson-core.pins.flake-compat ./tests/dependencies) sources;
+
+# npins (sources.json format 8).
+inherit (caisson-core.pins.npins ./npins) sources;
+```
+
+`root` names the tree being built: `{ outPath; dirty; rev?; dirtyRev?;
+lastModified?; narHash?; }`. A flake reads it from `self`; a flakeless
+top in a git working tree reads it with `caisson-core.pins.gitRoot ./.`
+(under an impure evaluation, since the working tree is not locked),
+which gives the revision of a clean tree and marks a dirty one.
+
+A flake input declared as a `follows` is the tree it lands on, with
+`pin.follows` naming the input path it follows. When an
+`--override-input` replaced a flake input, `pin.overridden` is true
+and `pin.url` still describes the lock.
+
 ## Tests
 
 The test suite is hermetic pure evaluation:
@@ -243,9 +276,8 @@ nix eval -f tests summary
 Pre-release. The contract described above is intended to freeze;
 until the first release it may still change. The
 [caisson framework](https://github.com/nix-caisson/caisson) builds
-on this repository, and
-[caisson-compat](https://github.com/nix-caisson/caisson-compat)
-tests the family against pinned upstreams.
+on this repository, and its pinned-world check tests the family
+against pinned upstreams.
 
 ## License
 

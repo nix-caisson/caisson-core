@@ -23,12 +23,51 @@ let
 
   throws = expr: !(builtins.tryEval (builtins.deepSeq expr true)).success;
 
+  # The pin readers' pure parts, read directly.
+  flakeLock = import ../lib-overlays/pins/flake-lock.nix;
+  npinsData = import ../lib-overlays/pins/npins.nix;
+
+  # The inputs a flake's `outputs` would receive, for the pins-flake
+  # fixture: `self` points at its tree (whose flake.lock is read), and
+  # each input carries what Nix puts on a resolved input.
+  pinsFlakeInputs = rec {
+    self = {
+      outPath = ./fixtures/pins-flake;
+      rev = "0000000000000000000000000000000000000abc";
+      lastModified = 1;
+      narHash = "sha256-SELF";
+    };
+    nixpkgs = {
+      outPath = "/nix/store/00000000000000000000000000000000-source";
+      rev = "1111111111111111111111111111111111111111";
+      narHash = "sha256-NIXPKGS";
+      lastModified = 10;
+      lib = "nixpkgs-lib-marker";
+    };
+    follower = nixpkgs;
+    nonflake = {
+      outPath = "/nix/store/11111111111111111111111111111111-source";
+      rev = "2222222222222222222222222222222222222222";
+      narHash = "sha256-NONFLAKE";
+      lastModified = 20;
+    };
+    overridden = {
+      outPath = "/nix/store/22222222222222222222222222222222-source";
+      narHash = "sha256-OVERRIDE";
+      lastModified = 31;
+    };
+    unlocked = {
+      outPath = "/nix/store/33333333333333333333333333333333-source";
+    };
+  };
+
   # The registry names of caisson-core's own entries, present in every
   # mkLib composition.
   coreNames = [
     "caisson-core/compose"
     "caisson-core/kernel"
     "caisson-core/lifecycle"
+    "caisson-core/pins"
     "caisson-core/readers"
     "caisson-core/resolve"
   ];
@@ -960,6 +999,283 @@ let
       && r.lib.caisson-core.modules == { }
       && r.meta.order == coreNames
       && builtins.attrNames r.lib.caisson-core == builtins.attrNames core;
+
+    # The pin readers. The suite fetches nothing: `pins.flake` reads a
+    # fake inputs attrset and the fixture's lock; `pins.flake-compat` is
+    # exercised on a relative path input, which is located, not fetched,
+    # and its remote inputs through the lock descriptors; `pins.npins`
+    # through its descriptors and the `pin` record of tarball pins,
+    # whose fetch is not forced by reading the record.
+    pinsFlakeSourcesAndRoot =
+      let
+        read = core.pins.flake pinsFlakeInputs;
+        s = read.sources;
+      in
+      builtins.attrNames s == [
+        "follower"
+        "nixpkgs"
+        "nonflake"
+        "overridden"
+        "unlocked"
+      ]
+      && read.root == {
+        outPath = ./fixtures/pins-flake;
+        dirty = false;
+        rev = "0000000000000000000000000000000000000abc";
+        lastModified = 1;
+        narHash = "sha256-SELF";
+      }
+      # The source is the input itself, outputs included, plus `pin`.
+      && s.nixpkgs.lib == "nixpkgs-lib-marker"
+      && s.nixpkgs.pin == {
+        system = "flake";
+        files = {
+          refs = "flake.nix";
+          revisions = "flake.lock";
+        };
+        overridden = false;
+        url = "github:NixOS/nixpkgs/nixos-unstable";
+        rev = "1111111111111111111111111111111111111111";
+        narHash = "sha256-NIXPKGS";
+        lastModified = 10;
+      };
+
+    pinsFlakeFollowsNonFlakeAndOverride =
+      let
+        s = (core.pins.flake pinsFlakeInputs).sources;
+      in
+      # A follows is the tree it lands on, with the path it follows.
+      s.follower.pin.follows == [ "nixpkgs" ]
+      && s.follower.pin.url == "github:NixOS/nixpkgs/nixos-unstable"
+      && s.follower.pin.rev == s.nixpkgs.pin.rev
+      && !(s.nixpkgs.pin ? follows)
+      && s.nonflake.pin.url == "git+https://example.com/nonflake.git?ref=main"
+      && !s.nonflake.pin.overridden
+      # The resolved tree differs from the lock: an override was in force.
+      && s.overridden.pin.overridden
+      && s.overridden.pin.narHash == "sha256-OVERRIDE"
+      # An input the lock does not name carries no ref.
+      && !(s.unlocked.pin ? url)
+      && !s.unlocked.pin.overridden;
+
+    pinsFlakeDirtyRoot =
+      (core.pins.flake {
+        self = {
+          outPath = ./fixtures/pins-flake;
+          dirtyRev = "0000000000000000000000000000000000000abc-dirty";
+          lastModified = 2;
+        };
+      }).root == {
+        outPath = ./fixtures/pins-flake;
+        dirty = true;
+        dirtyRev = "0000000000000000000000000000000000000abc-dirty";
+        lastModified = 2;
+      };
+
+    pinsFlakeRefusesMissingSelfAndOldLock =
+      throws (core.pins.flake { nixpkgs = { }; }).root
+      && throws
+        (core.pins.flake {
+          self.outPath = ./fixtures/pins-flake-v4;
+          x.narHash = "sha256-X";
+        }).sources.x.pin;
+
+    pinsFlakeCompatRelativeInput =
+      let
+        s = (core.pins.flake-compat ./fixtures/pins-flake-compat).sources;
+      in
+      builtins.attrNames s == [
+        "alias"
+        "local"
+        "nested"
+        "remote"
+      ]
+      && s.local.outPath == ./fixtures/pins-flake-compat/sub
+      && builtins.pathExists (s.local.outPath + "/marker")
+      && s.local.pin == {
+        system = "flake";
+        files = {
+          refs = "flake.nix";
+          revisions = "flake.lock";
+        };
+        dir = ./fixtures/pins-flake-compat;
+        url = "path:./sub";
+      }
+      && s.alias.outPath == s.local.outPath
+      && s.alias.pin.follows == [ "local" ];
+
+    pinsFlakeCompatRefusals =
+      let
+        s = (core.pins.flake-compat ./fixtures/pins-flake-compat).sources;
+      in
+      throws s.nested.outPath
+      && throws (core.pins.flake-compat ./fixtures/pins-plain-dir).sources
+      && throws (core.pins.flake-compat ./fixtures/pins-flake-v4).sources;
+
+    pinsFlakeLockDescriptors =
+      let
+        d = flakeLock.descriptors (flakeLock.readLock ./fixtures/pins-flake-compat);
+      in
+      d.remote == {
+        node = "remote";
+        locked = {
+          dir = "pkg";
+          lastModified = 40;
+          narHash = "sha256-REMOTE";
+          owner = "example";
+          repo = "remote";
+          rev = "4444444444444444444444444444444444444444";
+          type = "github";
+        };
+        original = {
+          dir = "pkg";
+          owner = "example";
+          ref = "v1";
+          repo = "remote";
+          type = "github";
+        };
+        flake = true;
+        relative = false;
+        parent = [ ];
+      }
+      && d.nested.node == "inner"
+      && d.nested.follows == [
+        "remote"
+        "inner"
+      ]
+      && d.nested.relative
+      && d.nested.parent == [ "remote" ]
+      && flakeLock.refToString d.remote.original == "github:example/remote/v1?dir=pkg";
+
+    # The fallback renderer, used where the evaluator has no
+    # flakeRefToString, renders as the evaluator does.
+    pinsFlakeRefFallbackRenders =
+      builtins.map flakeLock.renderRef [
+        {
+          type = "github";
+          owner = "NixOS";
+          repo = "nixpkgs";
+        }
+        {
+          type = "github";
+          owner = "NixOS";
+          repo = "nixpkgs";
+          ref = "nixos-unstable";
+        }
+        {
+          type = "github";
+          owner = "a";
+          repo = "b";
+          ref = "main";
+          dir = "sub";
+        }
+        {
+          type = "github";
+          owner = "a";
+          repo = "b";
+          host = "git.example.com";
+        }
+        {
+          type = "git";
+          url = "https://example.com/x.git";
+          ref = "main";
+          submodules = true;
+        }
+        {
+          type = "path";
+          path = "./sub";
+        }
+        {
+          type = "indirect";
+          id = "nixpkgs";
+          ref = "nixos-24.05";
+        }
+        {
+          type = "tarball";
+          url = "https://example.com/x.tar.gz";
+        }
+      ] == [
+        "github:NixOS/nixpkgs"
+        "github:NixOS/nixpkgs/nixos-unstable"
+        "github:a/b/main?dir=sub"
+        "github:a/b?host=git.example.com"
+        "git+https://example.com/x.git?ref=main&submodules=1"
+        "path:./sub"
+        "flake:nixpkgs/nixos-24.05"
+        "https://example.com/x.tar.gz"
+      ];
+
+    pinsNpinsDescriptors =
+      let
+        d = npinsData.describe "test" (builtins.fromJSON (builtins.readFile ./fixtures/pins-npins/sources.json));
+      in
+      d.github == {
+        type = "Git";
+        hash = "sha256-GITHUB";
+        url = "https://github.com/nixos/nixpkgs.git";
+        rev = "5555555555555555555555555555555555555555";
+        narHash = "sha256-GITHUB";
+        fetch.tarball = {
+          url = "https://github.com/nixos/nixpkgs/archive/5555555555555555555555555555555555555555.tar.gz";
+          sha256 = "sha256-GITHUB";
+        };
+      }
+      # Submodules take the git fetch, as npins does.
+      && d.plain-git.fetch.git == {
+        url = "https://example.com/plain.git";
+        submodules = true;
+        rev = "6666666666666666666666666666666666666666";
+        narHash = "sha256-PLAIN";
+        name = "source";
+      }
+      && d.channel.narHash == "sha256-CHANNEL"
+      && !(d.channel ? rev)
+      # A file that is not unpacked has a flat hash, no narHash.
+      && d.file.fetch ? file
+      && !(d.file ? narHash);
+
+    pinsNpinsSourceRecord =
+      let
+        s = (core.pins.npins ./fixtures/pins-npins).sources;
+      in
+      s.github.pin == {
+        system = "npins";
+        files = {
+          refs = "sources.json";
+          revisions = "sources.json";
+        };
+        dir = ./fixtures/pins-npins;
+        url = "https://github.com/nixos/nixpkgs.git";
+        hash = "sha256-GITHUB";
+        rev = "5555555555555555555555555555555555555555";
+        narHash = "sha256-GITHUB";
+      };
+
+    pinsNpinsRefusals =
+      throws (core.pins.npins ./fixtures/pins-npins).sources.container.pin
+      && throws (core.pins.npins ./fixtures/pins-npins-v5).sources
+      && throws (core.pins.npins ./fixtures/pins-plain-dir).sources;
+
+    pinsGitRootOutsideGit =
+      core.pins.gitRoot ./fixtures/pins-plain-dir == {
+        outPath = ./fixtures/pins-plain-dir;
+        dirty = false;
+      };
+
+    # The readers are an entry of every mkLib composition.
+    pinsComposedIntoMkLib =
+      let
+        composed = core.mkLib {
+          inputs = { };
+          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+        };
+      in
+      builtins.attrNames composed.caisson-core.pins == [
+        "flake"
+        "flake-compat"
+        "gitRoot"
+        "npins"
+      ];
 
   };
 
