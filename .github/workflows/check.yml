@@ -14,12 +14,16 @@ jobs:
           # defaulted determinate to true since v21, and this
           # project targets the Nix everyone else runs.
           determinate: false
+      # The builtins-only rule: nothing under lib/ or lib-overlays/
+      # reaches for nixpkgs' `lib` or a `pkgs`. Nix's parser rejects a
+      # free variable, so parsing every file refuses a free `lib.x` or
+      # `pkgs.x` while leaving prose inside strings alone. A `lib` or
+      # `pkgs` bound as an argument parses, and the tests refuse it:
+      # every file is called with closure arguments that hold neither.
       - name: builtins-only lint
         run: |
-          if grep -RnE '(^|[^a-zA-Z_.])(lib|pkgs)[.]' lib lib-overlays; then
-            echo "lib/ and lib-overlays/ may reference nothing but builtins" >&2
-            exit 1
-          fi
+          find lib lib-overlays -name '*.nix' -print0 \
+            | xargs -0 -n1 nix-instantiate --parse > /dev/null
       - run: nix flake check -L
       - run: nix eval -f tests summary
   # The slipping compat run: caisson-compat's pinned-world suite with
