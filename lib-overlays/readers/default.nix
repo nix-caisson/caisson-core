@@ -17,9 +17,14 @@
 #                              mkLib takes as `libOverlays`; the leaf is
 #                              `mkLibOverlay` applied to the entry's
 #                              directory.
+#   mkPkgOverlays ./pkg-overlays
+#                              reads <dir>/<name> into the registration
+#                              mkLib takes as `pkgOverlays`; the leaf is
+#                              `mkPkgOverlay` applied to the entry's
+#                              directory.
 #
-# Both return the function mkLib takes (`lib: { ... }` and
-# `mkLibOverlay: { ... }`), so the call sites read
+# Each returns the function mkLib takes (`lib: { ... }`,
+# `mkLibOverlay: { ... }`, `mkPkgOverlay: { ... }`), so the call sites read
 # `modules = caisson-core.mkModules ./modules;`. An entry is a
 # directory holding a default.nix, a symlink to one included, and
 # anything else in a directory being read is an error: a stray file
@@ -89,11 +94,15 @@ let
     dir: mkLibOverlay:
     builtins.mapAttrs (_name: path: mkLibOverlay path) (entriesOf "mkLibOverlays" dir);
 
+  mkPkgOverlays =
+    dir: mkPkgOverlay:
+    builtins.mapAttrs (_name: path: mkPkgOverlay path) (entriesOf "mkPkgOverlays" dir);
+
 in
 {
   overlay = _final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
-      inherit mkModules mkLibOverlays;
+      inherit mkModules mkLibOverlays mkPkgOverlays;
     };
   };
 }

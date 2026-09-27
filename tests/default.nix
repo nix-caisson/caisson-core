@@ -93,6 +93,49 @@ let
         };
     };
 
+  # Apply a list of nixpkgs overlays to an empty stand-in package set,
+  # as a package set would: a fixpoint folded in order.
+  applyPkgOverlays =
+    overlays:
+    let
+      fixed =
+        f:
+        let
+          x = f x;
+        in
+        x;
+    in
+    fixed (
+      builtins.foldl' (
+        f: overlay: final:
+        let
+          prev = f final;
+        in
+        prev // overlay final prev
+      ) (_final: { }) overlays
+    );
+
+  # A tree registering package overlays from a directory, and a tree
+  # consuming it as a project beside a local entry that imports the
+  # project's default entry through the consumer's own registry.
+  pkgOverlayProducer = core.mkLib {
+    sources = { };
+    pkgOverlays = core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
+  };
+  pkgOverlayConsumer = core.mkLib {
+    sources = { };
+    projects.producer.pkgOverlays = pkgOverlayProducer.caisson-core.libManifest.pkgOverlays;
+    pkgOverlays = mkPkgOverlay: {
+      local = mkPkgOverlay (
+        { closure-lib, ... }:
+        {
+          imports = [ closure-lib.caisson-core.libManifest.pkgOverlays."producer/default" ];
+          overlay = _final: prev: { local = prev.base + "+local"; };
+        }
+      );
+    };
+  };
+
   results = {
 
     unionOfContributions =
@@ -331,6 +374,7 @@ let
         configs = true;
         libOverlays = true;
         libOverlayImports = true;
+        pkgOverlays = true;
       }
       && throws (core.mkLib { sources = [ ]; });
 
@@ -585,6 +629,9 @@ let
       && builtins.isFunction composed.caisson-core.pins.flake-compat
       && builtins.isFunction composed.caisson-core.mkModules
       && builtins.isFunction composed.caisson-core.mkLibOverlays
+      && builtins.isFunction composed.caisson-core.mkPkgOverlay
+      && builtins.isFunction composed.caisson-core.mkPkgOverlays
+      && builtins.isFunction composed.caisson-core.pkgOverlaysFor
       && composed.caisson-core.modules == { };
 
     lifecycleOverlayClosureCarriesLib =
@@ -714,6 +761,140 @@ let
       (core.mkLibOverlays ./fixtures/lib-overlays-dir-stray) (path: path)
     );
 
+    # Package overlays: registered in mkLib beside libOverlays, keyed by
+    # registry name, recorded in the manifest, applied by nothing here.
+    pkgOverlaysRegisterFromAFunction =
+      let
+        composed = core.mkLib {
+          sources = { };
+          pkgOverlays = mkPkgOverlay: {
+            hello = mkPkgOverlay ({ ... }: { overlay = _final: _prev: { hello = "hi"; }; });
+          };
+        };
+        entry = composed.caisson-core.libManifest.pkgOverlays.hello;
+      in
+      entry.key == "hello"
+      && entry.origin == null
+      && entry.project == null
+      && entry.imports == [ ]
+      && (applyPkgOverlays (composed.caisson-core.pkgOverlaysFor [ entry ])).hello == "hi"
+      && (core.mkLib { sources = { }; }).caisson-core.libManifest.pkgOverlays == { };
+
+    pkgOverlaysRefuseNonFunction =
+      !(builtins.tryEval (
+        builtins.seq (core.mkLib {
+          sources = { };
+          pkgOverlays = { };
+        }) true
+      )).success;
+
+    readersMkPkgOverlaysReadsEntries =
+      let
+        registry = pkgOverlayProducer.caisson-core.libManifest.pkgOverlays;
+        applied = applyPkgOverlays (core.pkgOverlaysFor [ registry.default ]);
+      in
+      builtins.attrNames registry == [
+        "default"
+        "extra"
+      ]
+      && registry.default.origin == toString ./fixtures/pkg-overlays-dir/default
+      && builtins.map (i: i.key) registry.default.imports == [ "extra" ]
+      # The import is applied before its importer.
+      && applied.base == "extra+base";
+
+    readersMkPkgOverlaysRefusesAStrayFile = throws (
+      (core.mkPkgOverlays ./fixtures/lib-overlays-dir-stray) (path: path)
+    );
+
+    # A consumed project's entries join under `<project>/<name>`, their
+    # imports of siblings rekeyed with them, and each records the project.
+    pkgOverlaysFromProjects =
+      let
+        registry = pkgOverlayConsumer.caisson-core.libManifest.pkgOverlays;
+      in
+      builtins.attrNames registry == [
+        "local"
+        "producer/default"
+        "producer/extra"
+      ]
+      && builtins.map (i: i.key) registry."producer/default".imports == [ "producer/extra" ]
+      && registry."producer/default".project == "producer"
+      && (builtins.head registry."producer/default".imports).project == "producer"
+      && registry.local.project == null;
+
+    # The local view an export selector keeps: entries whose `project`
+    # is null.
+    pkgOverlaysLocalView =
+      let
+        registry = pkgOverlayConsumer.caisson-core.libManifest.pkgOverlays;
+      in
+      builtins.filter (name: registry.${name}.project == null) (builtins.attrNames registry) == [
+        "local"
+      ];
+
+    # Imports first, each key once: the sibling a selected entry imports
+    # is applied once even when it is selected as well.
+    pkgOverlaysForOrdersImportsFirstAndDeduplicates =
+      let
+        registry = pkgOverlayConsumer.caisson-core.libManifest.pkgOverlays;
+        overlays = core.pkgOverlaysFor [
+          registry."producer/default"
+          registry."producer/extra"
+          registry.local
+        ];
+        applied = applyPkgOverlays overlays;
+      in
+      builtins.length overlays == 3 && applied.base == "extra+base" && applied.local == "extra+base+local";
+
+    # One key reached through two imports, with one origin, is one entry.
+    pkgOverlaysForDeduplicatesAcrossImporters =
+      let
+        shared = {
+          key = "shared";
+          origin = "/shared";
+          overlay = _final: prev: { count = (prev.count or 0) + 1; };
+        };
+        a = {
+          key = "a";
+          imports = [ shared ];
+          overlay = _final: _prev: { };
+        };
+        b = {
+          key = "b";
+          imports = [ (shared // { imports = [ ]; }) ];
+          overlay = _final: _prev: { };
+        };
+      in
+      (applyPkgOverlays (core.pkgOverlaysFor [
+        a
+        b
+      ])).count == 1;
+
+    # Two different entries under one key are refused.
+    pkgOverlaysForRefusesTwoEntriesUnderOneKey =
+      let
+        shared = origin: {
+          key = "shared";
+          inherit origin;
+          overlay = _final: _prev: { };
+        };
+      in
+      throws (
+        core.pkgOverlaysFor [
+          {
+            key = "a";
+            imports = [ (shared "/one") ];
+            overlay = _final: _prev: { };
+          }
+          {
+            key = "b";
+            imports = [ (shared "/two") ];
+            overlay = _final: _prev: { };
+          }
+        ]
+      )
+      && throws (core.pkgOverlaysFor [ { overlay = _final: _prev: { }; } ]);
+
     lifecycleLocalModulesRegister =
       let
         composed = core.mkLib {
@@ -803,11 +984,13 @@ let
         "libOverlays"
         "modules"
         "namespace"
+        "pkgOverlays"
         "projects"
         "root"
         "sources"
         "systems"
       ]
+      && manifest.pkgOverlays == { }
       && manifest.sources == theSources
       && manifest.root == theRoot
       && manifest.defaultEcosystemSrc == { }

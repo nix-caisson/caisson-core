@@ -220,6 +220,147 @@ let
     in
     mkLibOverlay;
 
+  # Build a composition-bound mkPkgOverlay, the package overlay
+  # constructor: everything passed to it takes the closure attrset
+  # `{ closure-inputs, closure-lib, mkPkgOverlay, ... }:` as its first
+  # arg list and returns `{ imports ? [ ], overlay }`, the lib overlay
+  # entry's shape, with `overlay = final: prev: ...` a nixpkgs overlay.
+  # An entry built from a file records the file as its `origin`, the
+  # identity the selection compares when one key is reached twice; an
+  # entry built from a function has none. An entry imports a sibling
+  # by reading it from the registry of the composition that registered
+  # it, `closure-lib.caisson-core.libManifest.pkgOverlays.<name>`,
+  # where it already carries its key. Already-built entries (another
+  # flake's exported pkgOverlays) arrive through `projects`.
+  mkPkgOverlayFor =
+    {
+      sources,
+      # The composed fixpoint, bound lazily.
+      finalLib,
+    }:
+    let
+      mkPkgOverlay =
+        freeformOverlay:
+        let
+          requiresImport = (builtins.isPath freeformOverlay) || (builtins.isString freeformOverlay);
+          provenance =
+            if requiresImport then
+              "In package overlay imported from `${builtins.toString freeformOverlay}`.\n"
+            else
+              "";
+          reified = if requiresImport then import freeformOverlay else freeformOverlay;
+          applied =
+            if builtins.isFunction reified then
+              reified {
+                closure-inputs = sources;
+                closure-lib = finalLib;
+                inherit mkPkgOverlay;
+              }
+            else
+              throw ''
+                ${provenance}mkPkgOverlay expects a function taking the closure attrset
+                (`{ closure-inputs, closure-lib, mkPkgOverlay, ... }:`) as its first arg
+                list, but got a ${builtins.typeOf reified}. Register already-built package
+                overlays through `projects` instead of wrapping them in mkPkgOverlay.
+              '';
+        in
+        if
+          (builtins.isAttrs applied)
+          && (builtins.hasAttr "overlay" applied)
+          && builtins.isFunction applied.overlay
+        then
+          {
+            imports = applied.imports or [ ];
+            overlay = applied.overlay;
+            origin = if requiresImport then builtins.toString freeformOverlay else null;
+          }
+        else
+          throw ''
+            ${provenance}After the closure arg list, a package overlay is an
+            `{ imports ? [ ], overlay }` attrset: put the nixpkgs overlay
+            (`final: prev:`) under `overlay`, and the package overlays it depends
+            on under `imports`. Got a ${builtins.typeOf applied} instead.
+          '';
+    in
+    mkPkgOverlay;
+
+  # Key an entry and its imports for a registry. `keyOf` maps the key an
+  # entry carried to the key it has here; an import without a key gets
+  # a synthetic one derived from its importer's key and its position,
+  # so it keeps that position without claiming a name.
+  rekeyPkgOverlay =
+    keyOf: key: entry:
+    entry
+    // {
+      inherit key;
+      imports = builtins.genList (
+        i:
+        let
+          raw = builtins.elemAt (entry.imports or [ ]) i;
+          carried = raw.key or null;
+        in
+        rekeyPkgOverlay keyOf (if carried == null then "${key}#import-${toString i}" else keyOf carried) raw
+      ) (builtins.length (entry.imports or [ ]));
+    };
+
+  # The package overlays a selection applies, in order: each selected
+  # entry after the entries it imports, walked depth first, and each key
+  # once, where its first occurrence falls. One key reached through two
+  # paths is one entry when both carry the same origin (or either carries
+  # none, an entry built from a function); two different entries under
+  # one key are refused rather than one silently winning. The result is
+  # the list of nixpkgs overlays to hand a package set, in that order.
+  pkgOverlaysFor =
+    selection:
+    let
+      check =
+        e:
+        if !builtins.isAttrs e || !builtins.isFunction (e.overlay or null) then
+          throw "caisson-core.pkgOverlaysFor: a package overlay is an `{ key, imports ? [ ], overlay }` attrset whose `overlay` is a function (final: prev: { ... }); select entries from a registry (`libManifest.pkgOverlays`)"
+        else if !builtins.isString (e.key or null) then
+          throw "caisson-core.pkgOverlaysFor: a selected package overlay has no key; select entries from a registry (`libManifest.pkgOverlays`), where every entry carries its registry name"
+        else
+          e;
+      go =
+        state: stack: raw:
+        let
+          e = check raw;
+          k = e.key;
+          prior = state.seen.${k};
+          origin = e.origin or null;
+          priorOrigin = prior.origin or null;
+          afterImports = builtins.foldl' (s: i: go s (stack ++ [ k ]) i) state (e.imports or [ ]);
+        in
+        if builtins.elem k stack then
+          state
+        else if state.seen ? ${k} then
+          if origin != null && priorOrigin != null && origin != priorOrigin then
+            throw ''
+              caisson-core: two different package overlays are registered under the
+              key `${k}`, from `${priorOrigin}` and from `${origin}`. One key names one
+              entry: give one of them another name, or select one of them.
+            ''
+          else
+            state
+        else if afterImports.seen ? ${k} then
+          afterImports
+        else
+          afterImports
+          // {
+            seen = afterImports.seen // {
+              ${k} = e;
+            };
+            order = afterImports.order ++ [ e.overlay ];
+          };
+    in
+    if !builtins.isList selection then
+      throw "caisson-core.pkgOverlaysFor expects a list of package overlay entries (e.g. `[ registry.default ]`), but got a ${builtins.typeOf selection}."
+    else
+      (builtins.foldl' (s: e: go s [ ] e) {
+        seen = { };
+        order = [ ];
+      } selection).order;
+
   moduleMap =
     f: module:
     (
@@ -386,6 +527,11 @@ let
       libOverlays ? null,
       # Which registered overlays apply to this composition.
       libOverlayImports ? null,
+      # `mkPkgOverlay: { <name> = entry; }`, usually mkPkgOverlays ./pkg-overlays:
+      # the package overlays this tree registers, keyed entries whose
+      # `overlay` is a nixpkgs overlay. Nothing here applies them; a
+      # package set selects from the registry through pkgOverlaysFor.
+      pkgOverlays ? null,
     }@resolvedArgs:
     (
       let
@@ -466,6 +612,7 @@ let
         rawModules = given "modules" (composedLib: { });
         rawConfigs = given "configs" (composedLib: { });
         rawLibOverlays = given "libOverlays" (mkLibOverlay: { });
+        rawPkgOverlays = given "pkgOverlays" (mkPkgOverlay: { });
         libOverlayImports = given "libOverlayImports" (overlays: builtins.attrValues overlays);
         rawEcosystems = given "defaultEcosystemSrc" { };
         rawProjects = given "projects" { };
@@ -536,6 +683,34 @@ let
 
         projectLibOverlays = builtins.foldl' (
           acc: projectName: acc // prefixNames projectName (projects.${projectName}.libOverlays or { })
+        ) { } (builtins.attrNames projects);
+
+        # Consumed projects' package overlays, under `<project>/<name>`
+        # like their lib overlays. A project's entries and the entries
+        # they import carry the keys of the project's registry; a key
+        # without a `/` is one of the project's own names and is keyed
+        # `<project>/<key>` here, so an import of a sibling still meets
+        # the sibling, and a key with a `/` names an entry the project
+        # itself took from another project and keeps it, so two
+        # projects importing the same third project's entry import one
+        # entry. Each entry records the project that contributed it.
+        projectPkgOverlays = builtins.foldl' (
+          acc: projectName:
+          let
+            keyOf =
+              key: if builtins.match ".*/.*" key != null then key else "${projectName}/${key}";
+            contributed =
+              entry:
+              entry
+              // {
+                project = projectName;
+                imports = builtins.map contributed (entry.imports or [ ]);
+              };
+          in
+          acc
+          // builtins.mapAttrs (
+            prefixed: entry: contributed (rekeyPkgOverlay keyOf prefixed entry)
+          ) (prefixNames projectName (projects.${projectName}.pkgOverlays or { }))
         ) { } (builtins.attrNames projects);
 
         projectModules = builtins.foldl' (
@@ -635,6 +810,42 @@ let
               ignore it (`_mkLibOverlay: { ... }`) if you only register
               already-built overlays.
             '';
+
+        localPkgOverlays =
+          if builtins.isFunction rawPkgOverlays then
+            rawPkgOverlays (mkPkgOverlayFor {
+              inherit sources finalLib;
+            })
+          else
+            throw ''
+              mkLib expects `pkgOverlays` to be a function taking the
+              composition-bound mkPkgOverlay helper (`mkPkgOverlay: { ... }`),
+              usually `mkPkgOverlays ./pkg-overlays`, but got a
+              ${builtins.typeOf rawPkgOverlays}.
+            '';
+
+        # The package overlay registry: consumed projects' entries, then
+        # the local registrations, a local name winning a collision as in
+        # the lib overlay registry. An entry's key is its registry name.
+        # Every entry records where it came from in `project`: null for a
+        # local registration, the project's name for a contributed one,
+        # so an export selector can keep the local entries alone with a
+        # filter on that field.
+        registeredPkgOverlays =
+          projectPkgOverlays
+          // builtins.mapAttrs (
+            name: entry:
+            let
+              local =
+                e:
+                e
+                // {
+                  project = e.project or null;
+                  imports = builtins.map local (e.imports or [ ]);
+                };
+            in
+            local (rekeyPkgOverlay (key: key) name entry)
+          ) localPkgOverlays;
 
         # The same construction as the composition's own
         # `caisson-core.mkLibOverlay`, bound before the fixpoint
@@ -744,6 +955,7 @@ let
                 sources = recordedSources;
                 libOverlays = registeredLibOverlays;
                 modules = registeredModules;
+                pkgOverlays = registeredPkgOverlays;
               };
             };
           };
@@ -779,6 +991,7 @@ let
         (builtins.isFunction rawModules || modules)
         (builtins.isFunction rawConfigs || configs)
         (builtins.isFunction rawLibOverlays || libOverlays)
+        (builtins.isFunction rawPkgOverlays || localPkgOverlays)
         (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
         (builtins.isAttrs rawProjects || projects)
         (rawSystems == null || builtins.isList rawSystems || systems)
@@ -798,7 +1011,12 @@ in
         mkExtendedLib
         mkLib
         mkNixpkgsLibEntry
+        pkgOverlaysFor
         ;
+      mkPkgOverlay = mkPkgOverlayFor {
+        sources = closure-inputs;
+        finalLib = final;
+      };
       mkModule = mkModuleForComposition {
         sources = closure-inputs;
         finalLib = final;
