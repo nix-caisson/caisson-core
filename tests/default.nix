@@ -982,6 +982,7 @@ let
         "configs"
         "defaultEcosystemSrc"
         "libOverlays"
+        "moduleProjects"
         "modules"
         "namespace"
         "pkgOverlays"
@@ -1204,6 +1205,73 @@ let
       in
       composed.caisson-core.modules.nixos."dep/service".config.origin == "local"
       && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "local";
+
+    # Every registered lib overlay records where it came from: null for a
+    # local registration, the project's name for a contributed one, and
+    # `caisson-core` for the entries caisson-core publishes itself. The
+    # filter on `project == null` is the local view an export selector
+    # keeps.
+    lifecycleLibOverlaysRecordTheirProject =
+      let
+        dep = {
+          libOverlays.greeter = {
+            imports = [ ];
+            overlay = _final: _prev: { };
+          };
+        };
+        registry =
+          (core.mkLib {
+            sources = { };
+            projects = {
+              inherit dep;
+            };
+            libOverlays = mkLibOverlay: {
+              local = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
+            };
+          }).caisson-core.libManifest.libOverlays;
+      in
+      registry."dep/greeter".project == "dep"
+      && registry.local.project == null
+      && registry.nixpkgs-lib.project == "caisson-core"
+      && registry."caisson-core/compose".project == "caisson-core"
+      && builtins.filter (name: registry.${name}.project == null) (builtins.attrNames registry) == [
+        "local"
+      ];
+
+    # Beside the module dictionary, the project each module came from; a
+    # local registration that shadows a project's entry is local.
+    lifecycleModuleProjectsRecordOrigins =
+      let
+        dep = {
+          modules.nixos = {
+            service = {
+              config.origin = "dep";
+            };
+            shadowed = {
+              config.origin = "dep";
+            };
+          };
+        };
+        manifest =
+          (core.mkLib {
+            sources = { };
+            projects = {
+              inherit dep;
+            };
+            modules = composedLib: {
+              nixos = {
+                here = composedLib.caisson-core.mkModule "nixos" ({ ... }: { });
+                "dep/shadowed" = composedLib.caisson-core.mkModule "nixos" ({ ... }: { });
+              };
+            };
+          }).caisson-core.libManifest;
+      in
+      manifest.moduleProjects.nixos == {
+        "dep/service" = "dep";
+        "dep/shadowed" = null;
+        here = null;
+      }
+      && builtins.attrNames manifest.moduleProjects.nixos == builtins.attrNames manifest.modules.nixos;
 
     lifecycleProjectsMustBeAnAttrset = throws (
       core.mkLib {

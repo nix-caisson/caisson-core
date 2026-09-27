@@ -681,8 +681,14 @@ let
             }) (builtins.attrNames attrs)
           );
 
+        # Each contributed lib overlay records the project it came from
+        # in `project`, as a package overlay entry does.
         projectLibOverlays = builtins.foldl' (
-          acc: projectName: acc // prefixNames projectName (projects.${projectName}.libOverlays or { })
+          acc: projectName:
+          acc
+          // builtins.mapAttrs (_: overlay: overlay // { project = projectName; }) (
+            prefixNames projectName (projects.${projectName}.libOverlays or { })
+          )
         ) { } (builtins.attrNames projects);
 
         # Consumed projects' package overlays, under `<project>/<name>`
@@ -723,6 +729,29 @@ let
             builtins.map (class: {
               name = class;
               value = (acc.${class} or { }) // prefixNames projectName classed.${class};
+            }) (builtins.attrNames classed)
+          )
+        ) { } (builtins.attrNames projects);
+
+        # The project each contributed module came from, keyed like the
+        # module registry (`<class>.<project>/<name>`). A module value is
+        # a function, a path or an attrset, so the origin cannot ride on
+        # it the way `project` rides on an overlay entry, and wrapping it
+        # would change the module the registry and the exports hand out
+        # (its key, its definition locations, what `disabledModules`
+        # names); the origin sits beside the registry instead.
+        projectModuleProjects = builtins.foldl' (
+          acc: projectName:
+          let
+            classed = projects.${projectName}.modules or { };
+          in
+          acc
+          // builtins.listToAttrs (
+            builtins.map (class: {
+              name = class;
+              value =
+                (acc.${class} or { })
+                // builtins.mapAttrs (_: _: projectName) (prefixNames projectName classed.${class});
             }) (builtins.attrNames classed)
           )
         ) { } (builtins.attrNames projects);
@@ -876,13 +905,22 @@ let
         # key it carried from the tree that built it (two projects may
         # each export a `default`), so registering under a published
         # name replaces that entry wherever it is composed.
+        #
+        # Every entry records where it came from in `project`: the
+        # consumed project's name for a contributed one, null for a
+        # local registration, and `caisson-core` for the entries
+        # caisson-core publishes into every composition, which this
+        # composition did not register either. An export selector keeps
+        # the local entries with a filter on `project == null`.
         registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
-          coreOverlays
-          // {
-            nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource;
-          }
+          builtins.mapAttrs (_: overlay: overlay // { project = "caisson-core"; }) (
+            coreOverlays
+            // {
+              nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource;
+            }
+          )
           // projectLibOverlays
-          // libOverlays
+          // builtins.mapAttrs (_: overlay: overlay // { project = null; }) libOverlays
         );
 
         # The selection: caisson-core's entries are always composed and
@@ -926,6 +964,21 @@ let
             }) (builtins.attrNames modules)
           );
 
+        # Beside the module dictionary, per class and name, the project
+        # a registered module came from: null for a local registration
+        # (including one that shadows a project's entry of the same
+        # name), the project's name otherwise. An export selector keeps
+        # the local modules with a filter on this.
+        registeredModuleProjects =
+          projectModuleProjects
+          // builtins.listToAttrs (
+            builtins.map (class: {
+              name = class;
+              value =
+                (projectModuleProjects.${class} or { }) // builtins.mapAttrs (_: _: null) modules.${class};
+            }) (builtins.attrNames modules)
+          );
+
         # The lib manifest: the capture of what mkLib consumed, filled
         # into the `libManifest` slot through composition like
         # everything else.  Its dictionaries are the registered ones
@@ -955,6 +1008,7 @@ let
                 sources = recordedSources;
                 libOverlays = registeredLibOverlays;
                 modules = registeredModules;
+                moduleProjects = registeredModuleProjects;
                 pkgOverlays = registeredPkgOverlays;
               };
             };
