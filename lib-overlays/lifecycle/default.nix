@@ -11,16 +11,16 @@
 #     arrives as an entry, nixpkgs' library included (the published
 #     `nixpkgs-lib` entry, composed as upstream fixes it).
 #   - The source of that entry is the tree's declared
-#     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or an input
-#     named exactly so, through `resolve`; a miss is null, and the
-#     entry names the declaration only where it is composed.
+#     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or a pinned
+#     source named exactly so, through `resolve`; a miss is null, and
+#     the entry names the declaration only where it is composed.
 #   - The `caisson-core` namespace is contributed by caisson-core's own
 #     entries and nothing else.  The manifest (the capture of what
 #     mkLib consumed) enters through composition as a synthetic final
 #     overlay, the same channel as everything else.
 #
 # This overlay takes the bootstrap closure of caisson-core's own
-# entries: the inputs this composition closes over, the entries it
+# entries: the pinned sources this composition closes over, the entries it
 # publishes (`nixpkgs-lib`, in a composition mkLib builds), `compose`
 # and `coreEntries`, the function that makes these entries for a
 # composition. It uses builtins only, on purpose.
@@ -146,8 +146,8 @@ let
               caisson-core: the `nixpkgs-lib` entry has no source. Declare
               `defaultEcosystemSrc.nixpkgs-lib` (the nixpkgs.lib mirror, or nixpkgs'
               `lib` directory) or `defaultEcosystemSrc.nixpkgs` (a nixpkgs checkout)
-              in the mkLib call, or give the composing flake an input named exactly
-              `nixpkgs-lib` or `nixpkgs`.
+              in the mkLib call, or pin a source named exactly `nixpkgs-lib` or
+              `nixpkgs` in the `sources` passed to mkLib.
             ''
           else
             "${src}";
@@ -164,7 +164,7 @@ let
   # libOverlays) are registered directly rather than wrapped.
   mkLibOverlayFor =
     {
-      inputs,
+      sources,
       # Extra attrs merged into the closure applied to overlay files;
       # the composed fixpoint (closure-lib, so an overlay's functions
       # reach the registry of the composition that registered them),
@@ -191,7 +191,7 @@ let
               if builtins.isFunction reified then
                 reified (
                   {
-                    closure-inputs = inputs;
+                    closure-inputs = sources;
                     inherit mkLibOverlay;
                   }
                   // extraOverlayClosure
@@ -304,7 +304,7 @@ let
   # `caisson-core.modules.<class>`.
   mkModuleForComposition =
     {
-      inputs,
+      sources,
       finalLib,
     }:
     let
@@ -314,7 +314,7 @@ let
           mkModule = mkModuleClass moduleClass;
           closureArgs = {
             inherit mkModule;
-            closure-inputs = inputs;
+            closure-inputs = sources;
             closure-lib = finalLib;
           };
         in
@@ -350,31 +350,125 @@ let
     in
     mkModuleClass;
 
+  # mkLib's signature is its pattern, with no `...`: a missing or
+  # unexpected argument is Nix's own error at the call site, naming
+  # mkLib and pointing here.
   mkLib =
-    rawArgs:
+    {
+      # Replaces `inputs`; at a flake top: inherit (caisson-core.lib.caisson-core.pins.flake inputs) sources root;
+      #
+      # The tree's pinned sources, as a pin reader returns them. A
+      # flakeless top reads its pins with pins.flake-compat or
+      # pins.npins and supplies `root` itself (pins.gitRoot). The
+      # composition's overlays and modules close over these as
+      # `closure-inputs`; a composition that pins nothing passes
+      # `sources = { };`.
+      sources,
+      # The identity of the tree being built, as pins.flake or
+      # pins.gitRoot returns it; null for a composition that is not a
+      # top, a library composed inside a test or a check.
+      root ? null,
+      # The namespace this composition contributes to the composed
+      # library, e.g. "my-project".
+      namespace ? null,
+      # The platforms the tree builds on.
+      systems ? null,
+      # The tree's default source per ecosystem, by exact name (the
+      # argument once called `ecosystems`).
+      defaultEcosystemSrc ? null,
+      # Consumed projects' contributions, by project name.
+      projects ? null,
+      # `lib: { <class>.<name> = module; }`, usually mkModules ./modules.
+      modules ? null,
+      # `lib: { <class>.<name> = configuration; }`, usually mkModules ./configs.
+      configs ? null,
+      # `mkLibOverlay: { <name> = overlay; }`, usually mkLibOverlays ./lib-overlays.
+      libOverlays ? null,
+      # Which registered overlays apply to this composition.
+      libOverlayImports ? null,
+    }@resolvedArgs:
     (
       let
-        resolvedArgs = if builtins.isAttrs rawArgs then rawArgs else throw "mkLib expects an attrset.";
-
-        inputs =
-          resolvedArgs.inputs or (throw ''
-            mkLib requires `inputs`: the composing flake's inputs, closed over
-            by registered overlays and modules.
-          '');
-
-        rawModules = resolvedArgs.modules or (composedLib: { });
-        rawConfigs = resolvedArgs.configs or (composedLib: { });
-        rawLibOverlays = resolvedArgs.libOverlays or (mkLibOverlay: { });
-        libOverlayImports = resolvedArgs.libOverlayImports or (overlays: builtins.attrValues overlays);
-        rawEcosystems =
-          if resolvedArgs ? ecosystems then
-            throw ''
-              mkLib no longer takes `ecosystems`: the tree's default source per
-              ecosystem is declared as `defaultEcosystemSrc` (the same shape).
-            ''
+        sources =
+          if builtins.isAttrs resolvedArgs.sources then
+            resolvedArgs.sources
           else
-            resolvedArgs.defaultEcosystemSrc or { };
-        rawProjects = resolvedArgs.projects or { };
+            throw ''
+              mkLib expects `sources` to be an attribute set of pinned source trees keyed
+              by name, as a pin reader returns it, but got a ${builtins.typeOf resolvedArgs.sources}.
+            '';
+
+        rawRoot = resolvedArgs.root or null;
+        root =
+          if rawRoot == null || (builtins.isAttrs rawRoot && rawRoot ? outPath) then
+            rawRoot
+          else
+            throw ''
+              mkLib expects `root` to be the identity of the tree being built, an
+              attribute set with at least `outPath` (as pins.flake or pins.gitRoot
+              returns it), or null for a composition that is not a top, but got a
+              ${if builtins.isAttrs rawRoot then "set without outPath" else builtins.typeOf rawRoot}.
+            '';
+
+        # The sources as the record keeps them: a directory reader's pin
+        # files are relative to the directory it read (`pin.dir`), and
+        # the record states them relative to the root when the directory
+        # lies inside the root's tree. A directory outside it, or a
+        # composition with no root, keeps `pin.dir`. The root's path is
+        # read only for a source with a `pin.dir`: at a flake top the
+        # root's out path is `self.outPath`, which the flake's outputs
+        # cannot read while they are being computed.
+        recordedSources =
+          let
+            relativeTo =
+              prefix: dir:
+              let
+                d = toString dir;
+                n = builtins.stringLength prefix;
+              in
+              if d == prefix then
+                ""
+              else if builtins.substring 0 (n + 1) d == prefix + "/" then
+                builtins.substring (n + 1) (builtins.stringLength d) d
+              else
+                null;
+            record =
+              source:
+              let
+                pin = source.pin or null;
+                rel =
+                  if pin == null || !(pin ? dir) || root == null then
+                    null
+                  else
+                    relativeTo (toString root.outPath) pin.dir;
+              in
+              if rel == null then
+                source
+              else
+                source
+                // {
+                  pin = builtins.removeAttrs pin [ "dir" ] // {
+                    files = builtins.mapAttrs (_: file: if rel == "" then file else rel + "/" + file) pin.files;
+                  };
+                };
+          in
+          builtins.mapAttrs (_: record) sources;
+
+        # An optional argument left out, or passed as null, takes its
+        # default.
+        given =
+          name: default:
+          let
+            value = resolvedArgs.${name} or null;
+          in
+          if value == null then default else value;
+
+        rawModules = given "modules" (composedLib: { });
+        rawConfigs = given "configs" (composedLib: { });
+        rawLibOverlays = given "libOverlays" (mkLibOverlay: { });
+        libOverlayImports = given "libOverlayImports" (overlays: builtins.attrValues overlays);
+        rawEcosystems = given "defaultEcosystemSrc" { };
+        rawProjects = given "projects" { };
         rawSystems = resolvedArgs.systems or null;
         rawNamespace = resolvedArgs.namespace or null;
 
@@ -460,9 +554,9 @@ let
 
         # Declared ecosystem sources: mkLib-time facts, captured in the
         # manifest for the layered resolution higher layers perform
-        # (explicit argument, then these declarations, then an input
-        # with exactly the declared name). Nothing here interprets
-        # them.
+        # (explicit argument, then these declarations, then the pinned
+        # source with exactly the declared name). Nothing here
+        # interprets them.
         defaultEcosystemSrc =
           if builtins.isAttrs rawEcosystems then
             rawEcosystems
@@ -475,8 +569,8 @@ let
 
         # The source supplying the `nixpkgs-lib` part of the stack: the
         # part declared on its own, else the tree's nixpkgs (one pin
-        # supplies every part), else an input named exactly as either;
-        # null when nothing declares it.
+        # supplies every part), else a pinned source named exactly as
+        # either; null when nothing declares it.
         nixpkgsLibSource =
           let
             # The plain function rather than the one in the composed
@@ -486,12 +580,12 @@ let
             fromPart = resolve {
               name = "nixpkgs-lib";
               defaults = defaultEcosystemSrc;
-              inherit inputs;
+              inherit sources;
             };
             fromNixpkgs = resolve {
               name = "nixpkgs";
               defaults = defaultEcosystemSrc;
-              inherit inputs;
+              inherit sources;
             };
           in
           if fromPart != null then fromPart else fromNixpkgs;
@@ -547,7 +641,7 @@ let
         # exists: the registered overlay set is what the fixpoint is
         # built from, so it cannot be read back out of it.
         mkLibOverlayHere = mkLibOverlayFor {
-          inherit inputs;
+          inherit sources;
           extraOverlayClosure = {
             closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
@@ -558,7 +652,7 @@ let
 
         # caisson-core's own entries, bound to this composition.
         coreOverlays = coreEntries {
-          inherit inputs;
+          inherit sources;
           entries = publishedEntries;
         };
 
@@ -628,8 +722,11 @@ let
         # name collision), so export selections drawn from the
         # manifest see project-borne entries exactly like
         # hand-registered ones; `projects` keeps the raw per-project
-        # capture.  Checks belong to the export side (integrations),
-        # not here.
+        # capture.  `sources` are the pinned sources with each pin
+        # recorded against the root, and `root` the tree's identity.
+        # The record's `inputs`, the manifests consumed, is not filled
+        # yet.  Checks belong to the export side (integrations), not
+        # here.
         manifestOverlay = {
           imports = [ ];
           overlay = _final: prev: {
@@ -639,11 +736,12 @@ let
                 inherit
                   configs
                   defaultEcosystemSrc
-                  inputs
                   namespace
                   projects
+                  root
                   systems
                   ;
+                sources = recordedSources;
                 libOverlays = registeredLibOverlays;
                 modules = registeredModules;
               };
@@ -673,21 +771,19 @@ let
       in
       # Surface argument-shape errors as soon as the result is used,
       # rather than wherever the offending argument happens to be
-      # forced first. `||` only forces the throw-carrying binding in
-      # the non-function case.
-      builtins.seq (builtins.isFunction rawModules || modules) (
-        builtins.seq (builtins.isFunction rawConfigs || configs) (
-          builtins.seq (builtins.isFunction rawLibOverlays || libOverlays) (
-            builtins.seq (builtins.isAttrs rawEcosystems || defaultEcosystemSrc) (
-              builtins.seq (builtins.isAttrs rawProjects || projects) (
-                builtins.seq (rawSystems == null || builtins.isList rawSystems || systems) (
-                  builtins.seq (rawNamespace == null || builtins.isString rawNamespace || namespace) finalLib
-                )
-              )
-            )
-          )
-        )
-      )
+      # forced first. `||` forces the throw-carrying binding only when
+      # the argument is malformed.
+      builtins.foldl' (acc: check: builtins.seq check acc) finalLib [
+        sources
+        (rawRoot == null || (builtins.isAttrs rawRoot && rawRoot ? outPath) || root)
+        (builtins.isFunction rawModules || modules)
+        (builtins.isFunction rawConfigs || configs)
+        (builtins.isFunction rawLibOverlays || libOverlays)
+        (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
+        (builtins.isAttrs rawProjects || projects)
+        (rawSystems == null || builtins.isList rawSystems || systems)
+        (rawNamespace == null || builtins.isString rawNamespace || namespace)
+      ]
     );
 
 in
@@ -704,11 +800,11 @@ in
         mkNixpkgsLibEntry
         ;
       mkModule = mkModuleForComposition {
-        inputs = closure-inputs;
+        sources = closure-inputs;
         finalLib = final;
       };
       mkLibOverlay = mkLibOverlayFor {
-        inputs = closure-inputs;
+        sources = closure-inputs;
         # Lazily bound, so overlay files that contribute no modules do
         # not force the composed fixpoint through these.
         extraOverlayClosure = {

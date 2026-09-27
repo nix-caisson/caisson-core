@@ -34,7 +34,9 @@ let
     self = {
       outPath = ./fixtures/pins-flake;
       rev = "0000000000000000000000000000000000000abc";
+      shortRev = "0000000";
       lastModified = 1;
+      lastModifiedDate = "19700101000001";
       narHash = "sha256-SELF";
     };
     nixpkgs = {
@@ -268,24 +270,24 @@ let
         name = "nixpkgs-lib";
         explicit = "E";
         defaults.nixpkgs-lib = "D";
-        inputs.nixpkgs-lib = "I";
+        sources.nixpkgs-lib = "S";
       } == "E";
 
-    resolveDefaultBeatsInput =
+    resolveDefaultBeatsSource =
       resolve {
         name = "nixpkgs-lib";
         defaults.nixpkgs-lib = "D";
-        inputs.nixpkgs-lib = "I";
+        sources.nixpkgs-lib = "S";
       } == "D";
 
-    resolveInputByExactName =
+    resolveSourceByExactName =
       resolve {
         name = "nixpkgs-lib";
-        inputs = {
-          nixpkgs-lib = "I";
+        sources = {
+          nixpkgs-lib = "S";
           nixpkgs = "wrong";
         };
-      } == "I";
+      } == "S";
 
     resolveMissIsNull = resolve { name = "nixpkgs-lib"; } == null;
 
@@ -306,16 +308,46 @@ let
       && wired._type == "flake"
       && wired.inputs.greeting.text == "hello";
 
-    partitionExtraInputsLoadsLockedSubflake = core.partitionExtraInputs ./fixtures/deps-flake == { };
+    # A lockfile'd flake with no inputs has no sources.
+    pinsFlakeCompatNoInputs = (core.pins.flake-compat ./fixtures/deps-flake).sources == { };
 
     # Lifecycle: mkLib and the registration machinery.
 
-    lifecycleMkLibRefusesTheOldEcosystemsName = throws (
-      core.mkLib {
-        inputs = { };
-        ecosystems = { };
+    # mkLib's signature is its pattern, read back as data: `sources` is
+    # required, `root` and the rest are optional, and `inputs` and the
+    # old `ecosystems` are not arguments, so Nix refuses them at the
+    # call site (an error `tryEval` cannot catch, which is why the
+    # pattern is what is tested). A `sources` of the wrong type is
+    # caisson-core's refusal.
+    lifecycleMkLibSignature =
+      builtins.functionArgs core.mkLib == {
+        sources = false;
+        root = true;
+        namespace = true;
+        systems = true;
+        defaultEcosystemSrc = true;
+        projects = true;
+        modules = true;
+        configs = true;
+        libOverlays = true;
+        libOverlayImports = true;
       }
-    );
+      && throws (core.mkLib { sources = [ ]; });
+
+    lifecycleMkLibRootShape =
+      (core.mkLib { sources = { }; }).caisson-core.libManifest.root == null
+      && throws (
+        core.mkLib {
+          sources = { };
+          root = { };
+        }
+      ).caisson-core.libManifest
+      && throws (
+        core.mkLib {
+          sources = { };
+          root = "x";
+        }
+      ).caisson-core.libManifest;
 
     # A registered overlay's keyless imports still apply before it,
     # and before the overlay that imports the importer.
@@ -330,7 +362,7 @@ let
           overlay = _final: prev: { deep = prev.deeper + "e"; };
         };
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = mkLibOverlay: {
             main = mkLibOverlay (
               { ... }:
@@ -352,14 +384,14 @@ let
     # nixpkgs-lib entry.
     lifecycleBareCompositionNeedsNoSource =
       let
-        composed = core.mkLib { inputs = { }; };
+        composed = core.mkLib { sources = { }; };
       in
       builtins.isAttrs composed.caisson-core.libManifest && !(composed ? extend);
 
     lifecycleComposesOverlays =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = mkLibOverlay: {
             a-base = mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = 1; }; });
             b = mkLibOverlay (
@@ -380,7 +412,7 @@ let
     lifecycleNixpkgsLibEntryComposesFromTheDeclaredSource =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
           libOverlays = mkLibOverlay: {
             probe = mkLibOverlay (
@@ -401,7 +433,7 @@ let
     lifecycleNixpkgsLibEntryDerivesFromTheNixpkgsSource =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           defaultEcosystemSrc.nixpkgs = ./fixtures/nixpkgs-lib-stub;
           libOverlays = mkLibOverlay: {
             probe = mkLibOverlay (
@@ -419,7 +451,7 @@ let
     lifecycleNixpkgsLibEntryFailsOnlyWhereImported =
       throws
         (core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = mkLibOverlay: {
             probe = mkLibOverlay (
               { entries, ... }:
@@ -437,7 +469,7 @@ let
     lifecycleImportedPublishedEntriesResolveByKeyHere =
       let
         otherTree = core.mkLib {
-          inputs = { };
+          sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
           libOverlays = mkLibOverlay: {
             exported = mkLibOverlay (
@@ -450,7 +482,7 @@ let
           };
         };
         here = core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = mkLibOverlay: {
             nixpkgs-lib = mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
             borrowed = otherTree.caisson-core.libManifest.libOverlays.exported;
@@ -467,13 +499,13 @@ let
         project =
           marker:
           (core.mkLib {
-            inputs = { };
+            sources = { };
             libOverlays = mkLibOverlay: {
               default = mkLibOverlay ({ ... }: { overlay = _final: _prev: { ${marker} = true; }; });
             };
           }).caisson-core.libManifest.libOverlays;
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           projects = {
             a = {
               libOverlays = {
@@ -495,7 +527,7 @@ let
     lifecycleRegistrationReplacesThePublishedEntry =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = mkLibOverlay: {
             nixpkgs-lib = mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
             probe = mkLibOverlay (
@@ -516,10 +548,11 @@ let
           "probe"
         ];
 
-    lifecycleOverlayClosureCarriesInputs =
+    # `closure-inputs` is the composition's pinned sources.
+    lifecycleOverlayClosureCarriesSources =
       let
         composed = core.mkLib {
-          inputs = {
+          sources = {
             probe = 42;
           };
           libOverlays = mkLibOverlay: {
@@ -537,7 +570,7 @@ let
     lifecycleInjectsMachinery =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
         };
       in
       builtins.isFunction composed.caisson-core.mkLib
@@ -548,7 +581,8 @@ let
       && builtins.isFunction composed.caisson-core.resolve
       && builtins.isFunction composed.caisson-core.callFlake
       && builtins.isFunction composed.caisson-core.callConsumerFlake
-      && builtins.isFunction composed.caisson-core.partitionExtraInputs
+      && !(composed.caisson-core ? partitionExtraInputs)
+      && builtins.isFunction composed.caisson-core.pins.flake-compat
       && builtins.isFunction composed.caisson-core.mkModules
       && builtins.isFunction composed.caisson-core.mkLibOverlays
       && composed.caisson-core.modules == { };
@@ -556,7 +590,7 @@ let
     lifecycleOverlayClosureCarriesLib =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = mkLibOverlay: {
             marker = mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = "composed"; }; });
             probe = mkLibOverlay (
@@ -573,7 +607,7 @@ let
     readersMkModulesReadsClassDirectories =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           modules = core.mkModules ./fixtures/modules-dir;
           libOverlays = mkLibOverlay: { classes = mkLibOverlay declaringClasses; };
         };
@@ -595,7 +629,7 @@ let
     readersMkModulesRegistersConfigs =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           configs = core.mkModules ./fixtures/modules-dir;
           libOverlays = mkLibOverlay: { classes = mkLibOverlay declaringClasses; };
         };
@@ -623,7 +657,7 @@ let
               };
           };
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           modules = core.mkModules ./fixtures/modules-dir;
           libOverlays = mkLibOverlay: {
             classes = mkLibOverlay declaringClasses;
@@ -643,7 +677,7 @@ let
     readersMkModulesRefusesAnUndeclaredClass =
       throws
         (core.mkLib {
-          inputs = { };
+          sources = { };
           modules = core.mkModules ./fixtures/modules-dir;
         }).caisson-core.modules.flake;
 
@@ -662,7 +696,7 @@ let
     readersMkLibOverlaysReadsEntries =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           libOverlays = core.mkLibOverlays ./fixtures/lib-overlays-dir;
         };
       in
@@ -683,7 +717,7 @@ let
     lifecycleLocalModulesRegister =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           modules = composedLib: {
             nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
           };
@@ -694,7 +728,7 @@ let
     lifecycleConfigsRegister =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           configs = composedLib: {
             structural.top = composedLib.caisson-core.mkModule "structural" (
               { ... }: { config.origin = "top"; }
@@ -704,12 +738,12 @@ let
       in
       composed.caisson-core.configs.structural.top.config.origin == "top"
       && composed.caisson-core.libManifest.configs.structural.top.config.origin == "top"
-      && (core.mkLib { inputs = { }; }).caisson-core.configs == { };
+      && (core.mkLib { sources = { }; }).caisson-core.configs == { };
 
     lifecycleConfigsRefusesNonFunction =
       !(builtins.tryEval (
         builtins.seq (core.mkLib {
-          inputs = { };
+          sources = { };
           configs = { };
         }) true
       )).success;
@@ -729,7 +763,7 @@ let
               };
           };
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           modules = composedLib: {
             nixos.shared = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
           };
@@ -742,11 +776,18 @@ let
 
     lifecycleManifestCapturesMkLibFacts =
       let
-        theInputs = {
-          probe = true;
+        theSources = {
+          probe = {
+            outPath = ./fixtures/pins-plain-dir;
+          };
+        };
+        theRoot = {
+          outPath = ./fixtures;
+          dirty = false;
         };
         composed = core.mkLib {
-          inputs = theInputs;
+          sources = theSources;
+          root = theRoot;
           modules = composedLib: {
             nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
           };
@@ -759,14 +800,16 @@ let
       builtins.attrNames manifest == [
         "configs"
         "defaultEcosystemSrc"
-        "inputs"
         "libOverlays"
         "modules"
         "namespace"
         "projects"
+        "root"
+        "sources"
         "systems"
       ]
-      && manifest.inputs == theInputs
+      && manifest.sources == theSources
+      && manifest.root == theRoot
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
       && manifest.namespace == null
@@ -779,7 +822,7 @@ let
     lifecycleManifestSlotsArePresentAndNullUntilFilled =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
         };
       in
       builtins.isAttrs composed.caisson-core.libManifest
@@ -789,7 +832,7 @@ let
     lifecycleSystemsAreDeclaredOnMkLib =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           systems = [
             "x86_64-linux"
             "aarch64-linux"
@@ -804,13 +847,13 @@ let
     lifecycleSystemsMustBeAListOfStrings =
       throws (
         core.mkLib {
-          inputs = { };
+          sources = { };
           systems = "x86_64-linux";
         }
       )
       && throws (
         core.mkLib {
-          inputs = { };
+          sources = { };
           systems = [ 1 ];
         }
       );
@@ -818,7 +861,7 @@ let
     lifecycleNamespaceIsDeclaredOnMkLib =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           namespace = "my-project";
         };
       in
@@ -827,7 +870,7 @@ let
     lifecycleNamespaceIsAbsentWhenUndeclared =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
         };
       in
       composed.caisson-core.libManifest.namespace == null;
@@ -835,13 +878,13 @@ let
     lifecycleNamespaceMustBeAString =
       throws (
         core.mkLib {
-          inputs = { };
+          sources = { };
           namespace = [ "my-project" ];
         }
       )
       && throws (
         core.mkLib {
-          inputs = { };
+          sources = { };
           namespace = 1;
         }
       );
@@ -849,7 +892,7 @@ let
     lifecycleEcosystemDeclarationsJoinTheManifest =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           defaultEcosystemSrc = {
             nixpkgs = "/probe-nixpkgs";
           };
@@ -859,16 +902,16 @@ let
 
     lifecycleDefaultEcosystemSrcMustBeAnAttrset = throws (
       core.mkLib {
-        inputs = { };
+        sources = { };
         defaultEcosystemSrc = 42;
       }
     );
 
     lifecycleInjectedMkLibIsTheSameMkLib =
       let
-        outer = core.mkLib { inputs = { }; };
+        outer = core.mkLib { sources = { }; };
         inner = outer.caisson-core.mkLib {
-          inputs = { };
+          sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
           libOverlays = mkLibOverlay: {
             probe = mkLibOverlay (
@@ -903,7 +946,7 @@ let
           };
         };
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           projects = {
             inherit dep;
           };
@@ -933,7 +976,7 @@ let
           };
         };
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           projects = {
             inherit dep;
           };
@@ -965,7 +1008,7 @@ let
           };
         };
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           projects = {
             inherit dep;
           };
@@ -981,7 +1024,7 @@ let
 
     lifecycleProjectsMustBeAnAttrset = throws (
       core.mkLib {
-        inputs = { };
+        sources = { };
         projects = 42;
       }
     );
@@ -992,13 +1035,87 @@ let
     # keyed entries.
     lifecycleCoreEntriesComposeDirectly =
       let
-        r = compose { entries = builtins.attrValues (core.coreEntries { inputs = { }; }); };
+        r = compose { entries = builtins.attrValues (core.coreEntries { sources = { }; }); };
       in
       builtins.isFunction r.lib.caisson-core.mkLibOverlay
       && builtins.isFunction r.lib.caisson-core.mkLib
       && r.lib.caisson-core.modules == { }
       && r.meta.order == coreNames
       && builtins.attrNames r.lib.caisson-core == builtins.attrNames core;
+
+    # The record states a directory reader's pin files relative to the
+    # root when the directory lies in the root's tree, and keeps
+    # `pin.dir` otherwise; the source tree itself is what the closure
+    # sees, unchanged.
+    lifecycleRecordRelativizesPinFiles =
+      let
+        read = core.pins.flake-compat ./fixtures/pins-flake-compat;
+        inside = core.mkLib {
+          inherit (read) sources;
+          root = {
+            outPath = ./fixtures;
+            dirty = false;
+          };
+          libOverlays = mkLibOverlay: {
+            probe = mkLibOverlay (
+              { closure-inputs, ... }:
+              {
+                overlay = _final: _prev: { closed = closure-inputs; };
+              }
+            );
+          };
+        };
+        outside = core.mkLib {
+          inherit (read) sources;
+          root = {
+            outPath = ./fixtures/pins-flake;
+            dirty = false;
+          };
+        };
+        noRoot = core.mkLib { inherit (read) sources; };
+        pinOf = lib: lib.caisson-core.libManifest.sources.local.pin;
+      in
+      (pinOf inside).files == {
+        refs = "pins-flake-compat/flake.nix";
+        revisions = "pins-flake-compat/flake.lock";
+      }
+      && !((pinOf inside) ? dir)
+      && inside.closed.local.pin.dir == ./fixtures/pins-flake-compat
+      && (pinOf outside).dir == ./fixtures/pins-flake-compat
+      && (pinOf outside).files.refs == "flake.nix"
+      && (pinOf noRoot).dir == ./fixtures/pins-flake-compat;
+
+    # At a flake top the root's out path is `self.outPath`, which the
+    # flake's outputs cannot read while they are being computed; the
+    # record reads it only for a directory reader's source, so resolving
+    # a flake input from the manifest leaves it unread.
+    lifecycleRecordLeavesTheRootUnread =
+      (core.mkLib {
+        sources.probe = {
+          outPath = ./fixtures/pins-plain-dir;
+          pin.system = "flake";
+        };
+        root = {
+          outPath = throw "root read";
+          dirty = false;
+        };
+      }).caisson-core.libManifest.sources.probe.outPath == ./fixtures/pins-plain-dir;
+
+    # Resolution reads the pinned sources: a source named exactly as
+    # the ecosystem supplies it when nothing is declared.
+    lifecycleNixpkgsLibFromSources =
+      (core.mkLib {
+        sources.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+        libOverlays = mkLibOverlay: {
+          a = mkLibOverlay (
+            { entries, ... }:
+            {
+              imports = [ entries.nixpkgs-lib ];
+              overlay = _final: _prev: { };
+            }
+          );
+        };
+      }).stubIncrement 1 == 2;
 
     # The pin readers. The suite fetches nothing: `pins.flake` reads a
     # fake inputs attrset and the fixture's lock; `pins.flake-compat` is
@@ -1022,7 +1139,11 @@ let
         outPath = ./fixtures/pins-flake;
         dirty = false;
         rev = "0000000000000000000000000000000000000abc";
+        shortRev = "0000000";
+        dirtyRev = null;
+        dirtyShortRev = null;
         lastModified = 1;
+        lastModifiedDate = "19700101000001";
         narHash = "sha256-SELF";
       }
       # The source is the input itself, outputs included, plus `pin`.
@@ -1035,6 +1156,7 @@ let
         };
         overridden = false;
         url = "github:NixOS/nixpkgs/nixos-unstable";
+        follows = null;
         rev = "1111111111111111111111111111111111111111";
         narHash = "sha256-NIXPKGS";
         lastModified = 10;
@@ -1048,15 +1170,48 @@ let
       s.follower.pin.follows == [ "nixpkgs" ]
       && s.follower.pin.url == "github:NixOS/nixpkgs/nixos-unstable"
       && s.follower.pin.rev == s.nixpkgs.pin.rev
-      && !(s.nixpkgs.pin ? follows)
+      && s.nixpkgs.pin.follows == null
       && s.nonflake.pin.url == "git+https://example.com/nonflake.git?ref=main"
       && !s.nonflake.pin.overridden
       # The resolved tree differs from the lock: an override was in force.
       && s.overridden.pin.overridden
       && s.overridden.pin.narHash == "sha256-OVERRIDE"
       # An input the lock does not name carries no ref.
-      && !(s.unlocked.pin ? url)
+      && s.unlocked.pin.url == null
       && !s.unlocked.pin.overridden;
+
+    # Inside a flake's `outputs`, `self` cannot be read while the
+    # outputs are being computed, and the lock is read from `self`. A
+    # source's `pin` has names known without reading the lock, so
+    # asking what a pin holds leaves `self` unread.
+    pinsFlakePinNamesDoNotReadTheLock =
+      builtins.attrNames
+        (core.pins.flake {
+          self = throw "self forced";
+          nixpkgs = pinsFlakeInputs.nixpkgs;
+        }).sources.nixpkgs.pin == [
+        "files"
+        "follows"
+        "lastModified"
+        "narHash"
+        "overridden"
+        "rev"
+        "system"
+        "url"
+      ];
+
+    # A bare path or string input is a tree with that out path.
+    pinsFlakeBareInput =
+      let
+        s =
+          (core.pins.flake {
+            self.outPath = ./fixtures/pins-plain-dir;
+            bare = "/nix/store/44444444444444444444444444444444-source";
+          }).sources;
+      in
+      s.bare.outPath == "/nix/store/44444444444444444444444444444444-source"
+      && s.bare.pin.system == "flake"
+      && !s.bare.pin.overridden;
 
     pinsFlakeDirtyRoot =
       (core.pins.flake {
@@ -1068,9 +1223,31 @@ let
       }).root == {
         outPath = ./fixtures/pins-flake;
         dirty = true;
+        rev = null;
+        shortRev = null;
         dirtyRev = "0000000000000000000000000000000000000abc-dirty";
+        dirtyShortRev = null;
         lastModified = 2;
+        lastModifiedDate = null;
+        narHash = null;
       };
+
+    # Inside a flake's `outputs`, asking which attributes `self` has
+    # forces the outputs being computed. The root's names are fixed, so
+    # a root read from a `self` that must not be forced is still a set
+    # whose names can be read.
+    pinsFlakeRootNamesDoNotForceSelf =
+      builtins.attrNames (core.pins.flake { self = throw "self forced"; }).root == [
+        "dirty"
+        "dirtyRev"
+        "dirtyShortRev"
+        "lastModified"
+        "lastModifiedDate"
+        "narHash"
+        "outPath"
+        "rev"
+        "shortRev"
+      ];
 
     pinsFlakeRefusesMissingSelfAndOldLock =
       throws (core.pins.flake { nixpkgs = { }; }).root
@@ -1087,6 +1264,7 @@ let
       builtins.attrNames s == [
         "alias"
         "local"
+        "localFlake"
         "nested"
         "remote"
       ]
@@ -1100,9 +1278,23 @@ let
         };
         dir = ./fixtures/pins-flake-compat;
         url = "path:./sub";
+        follows = null;
       }
       && s.alias.outPath == s.local.outPath
       && s.alias.pin.follows == [ "local" ];
+
+    # A flake input comes with its outputs, as Nix hands one over, so a
+    # partition's `extraInputs` can read `inputs.<name>.flakeModule`.
+    pinsFlakeCompatFlakeInputCarriesOutputs =
+      let
+        s = (core.pins.flake-compat ./fixtures/pins-flake-compat).sources;
+      in
+      s.localFlake.flakeModule == "the-module"
+      && s.localFlake._type == "flake"
+      && s.localFlake.outputs.flakeModule == "the-module"
+      && s.localFlake.outPath == ./fixtures/pins-flake-compat/subflake
+      && s.localFlake.pin.url == "path:./subflake"
+      && !(s.local ? outputs);
 
     pinsFlakeCompatRefusals =
       let
@@ -1260,13 +1452,20 @@ let
       core.pins.gitRoot ./fixtures/pins-plain-dir == {
         outPath = ./fixtures/pins-plain-dir;
         dirty = false;
+        rev = null;
+        shortRev = null;
+        dirtyRev = null;
+        dirtyShortRev = null;
+        lastModified = null;
+        lastModifiedDate = null;
+        narHash = null;
       };
 
     # The readers are an entry of every mkLib composition.
     pinsComposedIntoMkLib =
       let
         composed = core.mkLib {
-          inputs = { };
+          sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
         };
       in

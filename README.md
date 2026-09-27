@@ -83,12 +83,12 @@ core.resolve {
   name = "nixpkgs-lib";
   explicit = null;        # highest priority when non-null
   defaults = { };         # the client repository's declared defaults
-  inputs = { };           # matched by exact name only
+  sources = { };          # the pinned sources, matched by exact name only
 }
 ```
 
-Priority is explicit argument, then declared default, then an input
-with exactly the declared name. A full miss returns `null`; `resolve`
+Priority is explicit argument, then declared default, then the pinned
+source with exactly the declared name. A full miss returns `null`; `resolve`
 can never throw or format an error message, because interpreting a
 miss is deliberately the calling layer's job.
 
@@ -100,8 +100,10 @@ modules over the empty seed, and injects the `caisson-core` namespace
 
 ```nix
 core.mkLib {
-  inputs = inputs;        # the composing flake's inputs, closed over
-                          # by registered overlays and modules
+  # The tree's pinned sources, closed over by registered overlays and
+  # modules as `closure-inputs`, and the tree's root, as a pin reader
+  # returns them (see Pin readers). Only `sources` is required.
+  inherit (core.pins.flake inputs) sources root;
   defaultEcosystemSrc = { nixpkgs = inputs.nixpkgs; };
                           # the tree's default source per ecosystem, by
                           # exact name; `nixpkgs` supplies the nixpkgs-lib
@@ -120,6 +122,11 @@ core.mkLib {
                                       # null when absent
 }
 ```
+
+The signature is the pattern of `mkLib`, with no `...`: a missing or
+unexpected argument is Nix's own error at the call site, naming
+`mkLib` and pointing at the pattern, whose comments say what each
+argument is.
 
 A tree laid out as `modules/<class>/<name>/default.nix`,
 `configs/<class>/<name>/default.nix` and
@@ -146,7 +153,7 @@ registrations by hand.
 Nothing is composed over. nixpkgs' library arrives as the published
 `nixpkgs-lib` entry, which imports the `lib` directory of the source
 supplying that part (`defaultEcosystemSrc.nixpkgs-lib`, else
-`.nixpkgs`, else an input named exactly so) as that source fixes it;
+`.nixpkgs`, else a pinned source named exactly so) as that source fixes it;
 a polyfill composed later overrides a name for readers of the
 composed library, not for upstream's own internal references, since
 nixpkgs' `lib/default.nix` exposes no way to re-tie its fixpoint. An
@@ -163,12 +170,13 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkLibOverlays`, `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three manifest slots
 (`libManifest`, `pkgsManifest`, `evalManifest`), plus `compose`,
-`resolve`, `importApply`, `callConsumerFlake`, and
-`partitionExtraInputs`. A registered overlay file takes the closure
+`resolve`, `importApply`, `callConsumerFlake`, and the pin readers
+`pins`. A registered overlay file takes the closure
 attrset
 `{ closure-inputs, closure-lib, mkLibOverlay, mkModule, contributeModules, contributeClasses, entries, ... }`
 as its first arg list and a registered module
-`{ closure-inputs, closure-lib, mkModule, ... }`; `closure-lib` is the
+`{ closure-inputs, closure-lib, mkModule, ... }`; `closure-inputs` is
+the composition's pinned sources, and `closure-lib` is the
 composed library of the composition that registered the file, bound
 lazily, so an overlay's functions and a module reach that
 composition's registry under `caisson-core.modules.<class>` wherever
@@ -180,12 +188,12 @@ same-named contributions.
 caisson-core is its own composition. `lib/default.nix` holds the one
 primitive, `compose`, and composes the overlays under
 `lib-overlays/<name>/default.nix` (`compose`, `resolve`, `kernel`,
-`lifecycle`, `readers`) over the empty seed into the `caisson-core`
+`lifecycle`, `readers`, `pins`) over the empty seed into the `caisson-core`
 namespace; `mkLib` composes the same entries into every consumer's
 library, keyed `caisson-core/<name>`, so `import caisson-core` and
 `caisson-core` inside a composed library are one definition and each
 part is a registered entry a same-key entry replaces. `coreEntries
-{ inputs, entries }` returns those entries for a composition assembled
+{ sources, entries }` returns those entries for a composition assembled
 with `compose` directly.
 
 A `projects` value is an attrset with `libOverlays` and class-keyed
@@ -195,8 +203,11 @@ already publishes. Its entries join the registered dictionaries under
 and a local registration wins a name collision.
 
 The manifest is the composition's self-description, recorded at
-`caisson-core.libManifest`: `inputs`, `defaultEcosystemSrc`,
-`systems`, `namespace`, the raw `projects` capture, the registered
+`caisson-core.libManifest`: `sources` (a directory reader's pin files
+stated relative to the root when the directory lies in the root's
+tree, `pin.dir` kept otherwise), `root` (null for a composition that
+is not a top), `defaultEcosystemSrc`, `systems`, `namespace`, the raw
+`projects` capture, the registered
 `libOverlays` and `modules` dictionaries (project entries prefixed,
 locals winning), and the `configs` registration, which also comes back
 as `caisson-core.configs`. `namespace` is the name the composition
@@ -217,18 +228,13 @@ consuming integrations type-check on the export side.
 
 ## The kernel
 
-Two self-contained companions ship alongside `compose`:
-
-- `callFlake { src, inputs, sourceInfo ? { } }` applies a flake's
-  outputs function to explicitly provided, already-wired inputs. No
-  lock handling and no fetching; every input is a constructed flake
-  or a plain source path.
-- `partitionExtraInputs <dir>` loads a lockfile'd subflake directory
-  and returns its inputs, safely under read-only evaluation (via the
-  patched copy of flake-compat in [vendor/](vendor/flake-compat)).
-
-Both keep the builtins-only rule; the vendored flake-compat carries
-its own license and provenance header.
+`callFlake { src, inputs, sourceInfo ? { } }` ships alongside
+`compose`: it applies a flake's outputs function to explicitly
+provided, already-wired inputs. No lock handling and no fetching;
+every input is a constructed flake or a plain source path.
+`callConsumerFlake` builds on it. The inputs of a lockfile'd subflake,
+what a flake-parts partition takes as `extraInputs`, are what
+`pins.flake-compat` reads (below).
 
 ## Pin readers
 
@@ -245,15 +251,21 @@ inherit (caisson-core.pins.flake inputs) sources root;
 
 # A flake.nix and flake.lock pair Nix's flake evaluator does not see,
 # such as a tests/dependencies directory, resolved the way
-# flake-compat does. Nothing overrides it and it has no root.
+# flake-compat does: a flake input comes with its outputs. Nothing
+# overrides it and it has no root. A flake-parts partition takes these
+# sources as its `extraInputs`.
 inherit (caisson-core.pins.flake-compat ./tests/dependencies) sources;
 
 # npins (sources.json format 8).
 inherit (caisson-core.pins.npins ./npins) sources;
 ```
 
-`root` names the tree being built: `{ outPath; dirty; rev?; dirtyRev?;
-lastModified?; narHash?; }`. A flake reads it from `self`; a flakeless
+`root` names the tree being built: `{ outPath; dirty; rev; shortRev;
+dirtyRev; dirtyShortRev; lastModified; lastModifiedDate; narHash; }`,
+the source-info fields a flake's `self` carries, each null where the
+reader has none. The names are fixed and the values lazy, since
+inside a flake's `outputs` asking which attributes `self` has forces
+the outputs being computed. A flake reads it from `self`; a flakeless
 top in a git working tree reads it with `caisson-core.pins.gitRoot ./.`
 (under an impure evaluation, since the working tree is not locked),
 which gives the revision of a clean tree and marks a dirty one.

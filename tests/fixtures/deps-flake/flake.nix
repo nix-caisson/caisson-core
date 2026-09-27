@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# partitionExtraInputs test fixture: a lockfile'd flake with no inputs.
+# pins.flake-compat test fixture: a lockfile'd flake with no inputs.
 {
   description = "deps fixture";
   outputs = _: { };

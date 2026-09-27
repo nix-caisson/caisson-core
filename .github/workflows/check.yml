@@ -26,10 +26,12 @@ jobs:
             | xargs -0 -n1 nix-instantiate --parse > /dev/null
       - run: nix flake check -L
       - run: nix eval -f tests summary
-  # The slipping compat run: caisson-compat's pinned-world suite with
-  # this working tree overriding the caisson-core pin;
-  # non-blocking by design (compat HEAD is mutable external state).
-  compat-suite:
+  # The slipping downstream run: caisson's pinned-world check, built
+  # from caisson's main with this working tree overriding its
+  # caisson-core pin. Non-blocking by design: caisson's main is state
+  # this repository does not control, and a breaking change here is
+  # red until the caisson change that follows it lands.
+  pinned-world:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -41,5 +43,5 @@ jobs:
           # project targets the Nix everyone else runs.
           determinate: false
       - run: |
-          nix eval 'github:nix-caisson/caisson-compat#lib.caisson-compat.tests.summary' \
+          nix build -L 'github:nix-caisson/caisson#checks.x86_64-linux.pinned-world' \
             --override-input caisson-core "path:$PWD"

@@ -35,19 +35,30 @@
 #   pin.dir        the directory holding the pin files, as a path, for
 #                  a reader given a directory; the root is not known to
 #                  the reader, so relativizing happens where both are
-#   pin.url        the ref as the pin files write it
+#   pin.url        the ref as the pin files write it (null for a flake
+#                  input its lock does not name)
 #   pin.rev, pin.narHash, pin.lastModified
 #                  the identity of the tree, where the pin system
 #                  records it
-#   pin.follows    for a flake input declared as a `follows`: the path
-#                  of input names it follows from the root; its tree and
-#                  identity are those of the input it lands on, and it
-#                  has no lock entry of its own to move
+#   pin.follows    flake readers: for an input declared as a `follows`,
+#                  the path of input names it follows from the root; its
+#                  tree and identity are those of the input it lands on,
+#                  and it has no lock entry of its own to move. Null for
+#                  every other input.
+#
+# The names of a flake input's `pin` are fixed and its values lazy, as
+# with the fields of a root (below), since `pins.flake` reads the lock
+# from `self`.
 #   pin.overridden `pins.flake` only: the resolved tree differs from
 #                  the lock (an `--override-input` was in force), so
 #                  `pin.url` describes the lock, not the tree
 #
-# A root is { outPath; dirty; rev?; dirtyRev?; lastModified?; narHash?; }.
+# A root is { outPath; dirty; rev; shortRev; dirtyRev; dirtyShortRev;
+# lastModified; lastModifiedDate; narHash; }, the source-info fields a
+# flake's `self` carries, each null where the reader has none. The
+# names are fixed and the values lazy: inside a flake's `outputs`,
+# asking which attributes `self` has forces the outputs being computed,
+# so a root read from `self` can be taken apart only by its values.
 #
 # Builtins only.
 { ... }:
@@ -79,17 +90,47 @@ let
     "lastModified"
   ];
 
+  # The source-info fields a flake's `self` carries beside `outPath`,
+  # which a root keeps, so whatever read them from `self` reads them
+  # from the root.
+  rootFields = [
+    "rev"
+    "shortRev"
+    "dirtyRev"
+    "dirtyShortRev"
+    "lastModified"
+    "lastModifiedDate"
+    "narHash"
+  ];
+
+  # A root from `info`: every field of `rootFields`, null where `info`
+  # has none, with values read lazily.
+  mkRoot =
+    outPath: dirty: info:
+    {
+      inherit outPath dirty;
+    }
+    // builtins.listToAttrs (
+      builtins.map (name: {
+        inherit name;
+        value = info.${name} or null;
+      }) rootFields
+    );
+
   flakeFiles = {
     refs = "flake.nix";
     revisions = "flake.lock";
   };
 
-  fromLock =
-    descriptor:
-    {
-      url = flakeLock.refToString descriptor.original;
-    }
-    // present [ "follows" ] descriptor;
+  # The part of a flake input's `pin` that its lock records: the ref and,
+  # for a `follows`, the path it follows (null otherwise). The names are
+  # fixed and the values lazy, since `pins.flake` reads the lock from
+  # `self`, which the flake's outputs cannot read while they are being
+  # computed; `descriptor` is null for an input the lock does not name.
+  fromLock = descriptor: {
+    url = if descriptor == null then null else flakeLock.refToString descriptor.original;
+    follows = if descriptor == null then null else descriptor.follows or null;
+  };
 
   flake =
     inputs:
@@ -103,9 +144,13 @@ let
       lock = flakeLock.readLock self.outPath;
       descriptors =
         if lock == null then { } else flakeLock.descriptors (flakeLock.checkVersion "pins.flake" lock);
+      # An input handed over as a bare path or store-path string, as a
+      # hand-wired flake or `callConsumerFlake`'s pool may pass one, is
+      # a tree with that out path.
       sourceOf =
-        name: input:
+        name: raw:
         let
+          input = if builtins.isAttrs raw then raw else { outPath = raw; };
           descriptor = descriptors.${name} or null;
           lockedHash = if descriptor == null then null else descriptor.locked.narHash or null;
         in
@@ -117,21 +162,12 @@ let
             overridden = lockedHash != null && input ? narHash && input.narHash != lockedHash;
           }
           // identity input
-          // (if descriptor == null then { } else fromLock descriptor);
+          // fromLock descriptor;
         };
     in
     {
       sources = builtins.mapAttrs sourceOf (builtins.removeAttrs inputs [ "self" ]);
-      root = {
-        outPath = self.outPath;
-        dirty = self ? dirtyRev;
-      }
-      // present [
-        "rev"
-        "dirtyRev"
-        "lastModified"
-        "narHash"
-      ] self;
+      root = mkRoot self.outPath (self ? dirtyRev) self;
     };
 
   flake-compat =
@@ -148,43 +184,76 @@ let
           ''
         else
           flakeLock.checkVersion "pins.flake-compat" raw;
-      # A relative `path:` input lies inside the directory itself, so it
-      # is located as a path value and never coerced to a store path: the
-      # read stays valid under read-only evaluation (`nix flake check
-      # --no-build`). Every other input is fetched from its locked attrs,
-      # which read-only evaluation allows.
-      treeOf =
-        name: descriptor:
-        if descriptor.relative then
-          if descriptor.parent != [ ] then
-            throw ''
-              caisson-core: pins.flake-compat: input `${name}` of `${toString dir}` lands on
-              a relative path input inside the input `${builtins.concatStringsSep "/" descriptor.parent}`,
-              which is not supported; only relative path inputs of the flake itself are.
-            ''
-          else
-            {
-              outPath = if descriptor.locked.path == "" then dir else dir + "/${descriptor.locked.path}";
-            }
-        else
-          let
-            fetched = builtins.fetchTree (builtins.removeAttrs descriptor.locked [ "dir" ]);
-            subdir = descriptor.locked.dir or "";
-          in
-          fetched // { outPath = fetched.outPath + (if subdir == "" then "" else "/" + subdir); };
-      sourceOf =
-        name: descriptor:
+      # Every node of the lock as flake-compat makes it: a flake node is
+      # the flake, its `outputs` applied to its own inputs and itself,
+      # decorated with `inputs`, `outputs`, `sourceInfo`, `outPath` and
+      # `_type`, as Nix hands a flake input over; a `flake = false` node
+      # is its source tree. Nodes resolve lazily, so an input's inputs
+      # are fetched and evaluated only when read.
+      #
+      # A relative `path:` node of the flake itself lies inside the
+      # directory, so it is located as a path value and never coerced to
+      # a store path: the read stays valid under read-only evaluation
+      # (`nix flake check --no-build`). Every other node is fetched from
+      # its locked attrs, which read-only evaluation allows. The root is
+      # the directory and is never evaluated: its `outputs` are not what
+      # the reader is for.
+      nodes = builtins.mapAttrs (
+        key: node:
         let
-          tree = treeOf name descriptor;
+          locked = node.locked or { };
+          relative = (locked.type or null) == "path" && builtins.substring 0 1 (locked.path or "/") != "/";
+          parent = node.parent or [ ];
+          sourceInfo =
+            if relative then
+              if parent != [ ] then
+                throw ''
+                  caisson-core: pins.flake-compat: the lock node `${key}` of `${toString dir}` is a
+                  relative path input inside the input `${builtins.concatStringsSep "/" parent}`,
+                  which is not supported; only relative path inputs of the flake itself are.
+                ''
+              else
+                { outPath = if locked.path == "" then dir else dir + "/${locked.path}"; }
+            else
+              builtins.fetchTree ((node.info or { }) // builtins.removeAttrs locked [ "dir" ]);
+          subdir = if relative then "" else locked.dir or "";
+          outPath = sourceInfo.outPath + (if subdir == "" then "" else "/" + subdir);
+          inputs = builtins.mapAttrs (_name: spec: nodes.${flakeLock.resolveInput lock spec}.result) (
+            node.inputs or { }
+          );
+          outputs = (import (outPath + "/flake.nix")).outputs (inputs // { self = result; });
+          result =
+            if node.flake or true then
+              outputs
+              // sourceInfo
+              // {
+                inherit
+                  outPath
+                  inputs
+                  outputs
+                  sourceInfo
+                  ;
+                _type = "flake";
+              }
+            else
+              sourceInfo // { inherit outPath sourceInfo; };
         in
-        tree
+        {
+          inherit result sourceInfo;
+        }
+      ) (builtins.removeAttrs lock.nodes [ lock.root ]);
+      # A source is the input itself with `pin` beside its outputs; the
+      # identity comes from the lock and the fetched tree.
+      sourceOf =
+        _name: descriptor:
+        nodes.${descriptor.node}.result
         // {
           pin = {
             system = "flake";
             files = flakeFiles;
             inherit dir;
           }
-          // identity (descriptor.locked // tree)
+          // identity (descriptor.locked // nodes.${descriptor.node}.sourceInfo)
           // fromLock descriptor;
         };
     in
@@ -236,21 +305,11 @@ let
         zeros = "0000000000000000000000000000000000000000";
         clean = fetched ? rev && fetched.rev != zeros;
       in
-      {
-        outPath = fetched.outPath;
-        dirty = !clean;
-      }
-      // (if clean then { inherit (fetched) rev; } else { })
-      // present [
-        "dirtyRev"
-        "lastModified"
-        "narHash"
-      ] fetched
+      mkRoot fetched.outPath (!clean) (
+        if clean then fetched else builtins.removeAttrs fetched [ "rev" "shortRev" ]
+      )
     else
-      {
-        outPath = dir;
-        dirty = false;
-      };
+      mkRoot dir false { };
 
 in
 {

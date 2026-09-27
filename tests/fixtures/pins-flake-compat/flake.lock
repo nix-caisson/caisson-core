@@ -14,12 +14,24 @@
       ]
     },
     "local": {
+      "flake": false,
       "locked": {
         "path": "./sub",
         "type": "path"
       },
       "original": {
         "path": "./sub",
+        "type": "path"
+      },
+      "parent": []
+    },
+    "localFlake": {
+      "locked": {
+        "path": "./subflake",
+        "type": "path"
+      },
+      "original": {
+        "path": "./subflake",
         "type": "path"
       },
       "parent": []
@@ -51,6 +63,7 @@
           "local"
         ],
         "local": "local",
+        "localFlake": "localFlake",
         "nested": [
           "remote",
           "inner"

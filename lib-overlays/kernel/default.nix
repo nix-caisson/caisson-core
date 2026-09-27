@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: MIT
 #
 # The kernel: minimal flake-output wiring over explicitly provided,
-# already-wired inputs (no lock handling, no fetching), the
-# read-only-eval-safe partition extra-inputs loader, and the consumer
-# flake caller built on the first. call-flake.nix and
-# partition-extra-inputs.nix are self-contained on purpose; see their
-# headers.
+# already-wired inputs (no lock handling, no fetching), and the
+# consumer flake caller built on it. call-flake.nix is self-contained
+# on purpose; see its header. A lockfile'd subflake's inputs, which a
+# flake-parts partition takes as `extraInputs`, are what
+# `pins.flake-compat` reads.
 { ... }:
 let
 
   callFlake = import ./call-flake.nix;
-  partitionExtraInputs = import ./partition-extra-inputs.nix;
 
   # Evaluate a consumer-style flake from source with explicitly
   # supplied inputs. The flake's declared inputs resolve by name:
@@ -88,7 +87,7 @@ in
 {
   overlay = _final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
-      inherit callFlake partitionExtraInputs callConsumerFlake;
+      inherit callFlake callConsumerFlake;
     };
   };
 }
