@@ -1,0 +1,63 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 10,
+        "narHash": "sha256-NIXPKGS",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "1111111111111111111111111111111111111111",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nonflake": {
+      "flake": false,
+      "locked": {
+        "lastModified": 20,
+        "narHash": "sha256-NONFLAKE",
+        "ref": "refs/heads/main",
+        "rev": "2222222222222222222222222222222222222222",
+        "type": "git",
+        "url": "https://example.com/nonflake.git"
+      },
+      "original": {
+        "ref": "main",
+        "type": "git",
+        "url": "https://example.com/nonflake.git"
+      }
+    },
+    "overridden": {
+      "locked": {
+        "lastModified": 30,
+        "narHash": "sha256-LOCKED",
+        "owner": "example",
+        "repo": "overridden",
+        "rev": "3333333333333333333333333333333333333333",
+        "type": "github"
+      },
+      "original": {
+        "owner": "example",
+        "repo": "overridden",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "follower": [
+          "nixpkgs"
+        ],
+        "nixpkgs": "nixpkgs",
+        "nonflake": "nonflake",
+        "overridden": "overridden"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
