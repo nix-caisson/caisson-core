@@ -145,16 +145,16 @@ let
   ];
 
   # The keyed entries of caisson-core, bound to one composition: the
-  # inputs the composition closes over and the entries it publishes
-  # (the `nixpkgs-lib` entry, in a composition mkLib builds). Each
-  # overlay file takes the closure
+  # pinned sources the composition closes over (its `closure-inputs`)
+  # and the entries it publishes (the `nixpkgs-lib` entry, in a
+  # composition mkLib builds). Each overlay file takes the closure
   # `{ closure-inputs, entries, compose, coreEntries, ... }` and
   # returns `{ imports ? [ ], overlay }`, the shape mkLibOverlay
   # produces; the closure is applied here by hand, since mkLibOverlay
   # is itself one of the things being composed.
   coreEntries =
     {
-      inputs ? { },
+      sources ? { },
       entries ? { },
     }:
     builtins.listToAttrs (
@@ -163,7 +163,7 @@ let
         let
           key = "caisson-core/${name}";
           applied = import (../lib-overlays + "/${name}") {
-            closure-inputs = inputs;
+            closure-inputs = sources;
             inherit entries compose coreEntries;
           };
         in

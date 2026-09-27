@@ -146,6 +146,8 @@ in
     readLock
     checkVersion
     descriptors
+    resolveInput
+    inputByPath
     refToString
     renderRef
     ;
