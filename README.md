@@ -113,6 +113,7 @@ core.mkLib {
                                       # (configs/<class>/<name>)
   libOverlays = mkLibOverlay: { };    # named overlay registrations
   libOverlayImports = builtins.attrValues;  # selection for this library
+  pkgOverlays = mkPkgOverlay: { };    # named package overlay registrations
   projects = { };                     # consumed upstream contributions,
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
@@ -129,11 +130,13 @@ unexpected argument is Nix's own error at the call site, naming
 argument is.
 
 A tree laid out as `modules/<class>/<name>/default.nix`,
-`configs/<class>/<name>/default.nix` and
-`lib-overlays/<name>/default.nix` derives the three registrations
+`configs/<class>/<name>/default.nix`,
+`lib-overlays/<name>/default.nix` and
+`pkg-overlays/<name>/default.nix` derives the four registrations
 from its directories: `modules = core.mkModules ./modules;`,
-`configs = core.mkModules ./configs;` and
-`libOverlays = core.mkLibOverlays ./lib-overlays;`. The first level of a
+`configs = core.mkModules ./configs;`,
+`libOverlays = core.mkLibOverlays ./lib-overlays;` and
+`pkgOverlays = core.mkPkgOverlays ./pkg-overlays;`. The first level of a
 modules directory is the class, whatever its name, and each entry
 registers through the class index of the composed library,
 `caisson-core.classes.<class>`: the `mkModule` of the integration that
@@ -144,7 +147,7 @@ declaration composed later replaces it, which is how an integration
 wrapping another takes over the class, and caisson-core declares the
 class-free `generic` class itself. A directory for a class no
 composed integration declares is an error. `mkLibOverlays` applies
-`mkLibOverlay` to each entry. An entry is a directory holding a
+`mkLibOverlay` to each entry, and `mkPkgOverlays` `mkPkgOverlay`. An entry is a directory holding a
 `default.nix`, a symlink to one included; anything else in a
 directory being read is an error, so a stray file cannot silently
 vanish from a registry. A tree with another layout writes the
@@ -166,8 +169,9 @@ those names like any registration, so a same-name registration
 replaces either.
 
 The composed library carries, under `caisson-core`: `mkLib`,
-`mkLibOverlay`, `mkModule` (class-parameterized), `mkModules`,
-`mkLibOverlays`, `mkNixpkgsLibEntry`, the class-keyed `modules`
+`mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized),
+`mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
+`mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three manifest slots
 (`libManifest`, `pkgsManifest`, `evalManifest`), plus `compose`,
 `resolve`, `importApply`, `callConsumerFlake`, and the pin readers
@@ -196,11 +200,35 @@ part is a registered entry a same-key entry replaces. `coreEntries
 { sources, entries }` returns those entries for a composition assembled
 with `compose` directly.
 
-A `projects` value is an attrset with `libOverlays` and class-keyed
-`modules` dictionaries, the outputs a flake built on this machinery
-already publishes. Its entries join the registered dictionaries under
-`<project>/<name>`, so the existing selections keep per-item choice
-and a local registration wins a name collision.
+A `projects` value is an attrset with `libOverlays`, class-keyed
+`modules` and `pkgOverlays` dictionaries, the outputs a flake built on
+this machinery publishes. Its entries join the registered dictionaries
+under `<project>/<name>`, so the existing selections keep per-item
+choice and a local registration wins a name collision.
+
+The package overlay registry holds package overlays in the lib
+overlay entry's shape: a file handed to `mkPkgOverlay` takes the
+closure `{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and
+returns `{ imports ? [ ], overlay }`, where `overlay` is a nixpkgs
+overlay. Every registered entry carries its registry name as `key`,
+the file it was read from as `origin` (null for one built from a
+function), and `project`, null for a local registration and the
+project's name for a contributed one, so a selection of the local
+entries alone is a filter on that field. An entry imports a sibling
+from the registry of the composition that registered it,
+`closure-lib.caisson-core.libManifest.pkgOverlays.<name>`. A
+project's entries are rekeyed as they join: a key without a `/` is
+one of the project's own names and becomes `<project>/<key>`, imports
+included, so an import still meets its sibling; a key with a `/`
+names an entry the project took from another project and is kept, so
+two projects importing the same entry import one entry. Nothing in
+caisson-core applies the registry. `pkgOverlaysFor selection` turns a
+list of entries into the list of nixpkgs overlays a package set
+applies: each entry after the entries it imports, each key once where
+it first occurs, and two entries with different origins under one key
+refused. By convention the entries named `default` (`default`,
+`<project>/default`) are the default selection, as for modules; the
+layer that builds package sets applies that default.
 
 The manifest is the composition's self-description, recorded at
 `caisson-core.libManifest`: `sources` (a directory reader's pin files
@@ -208,8 +236,8 @@ stated relative to the root when the directory lies in the root's
 tree, `pin.dir` kept otherwise), `root` (null for a composition that
 is not a top), `defaultEcosystemSrc`, `systems`, `namespace`, the raw
 `projects` capture, the registered
-`libOverlays` and `modules` dictionaries (project entries prefixed,
-locals winning), and the `configs` registration, which also comes back
+`libOverlays`, `modules` and `pkgOverlays` dictionaries (project
+entries prefixed, locals winning), and the `configs` registration, which also comes back
 as `caisson-core.configs`. `namespace` is the name the composition
 holds for itself, the namespace its overlays contribute to the
 composed library; a layer above gives a configuration no parent
