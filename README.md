@@ -204,7 +204,14 @@ A `projects` value is an attrset with `libOverlays`, class-keyed
 `modules` and `pkgOverlays` dictionaries, the outputs a flake built on
 this machinery publishes. Its entries join the registered dictionaries
 under `<project>/<name>`, so the existing selections keep per-item
-choice and a local registration wins a name collision.
+choice and a local registration wins a name collision. Each registry
+records where an entry came from, so an export selector can keep the
+entries the composition registered itself: a lib overlay entry carries
+`project` (null for a local registration, the project's name for a
+contributed one, `caisson-core` for the entries caisson-core publishes
+into every composition), and the manifest's `moduleProjects.<class>.<name>`
+holds the same for modules, beside the module dictionary, since a
+module value cannot carry a field without becoming a different module.
 
 The package overlay registry holds package overlays in the lib
 overlay entry's shape: a file handed to `mkPkgOverlay` takes the
@@ -237,7 +244,7 @@ tree, `pin.dir` kept otherwise), `root` (null for a composition that
 is not a top), `defaultEcosystemSrc`, `systems`, `namespace`, the raw
 `projects` capture, the registered
 `libOverlays`, `modules` and `pkgOverlays` dictionaries (project
-entries prefixed, locals winning), and the `configs` registration, which also comes back
+entries prefixed, locals winning), `moduleProjects`, and the `configs` registration, which also comes back
 as `caisson-core.configs`. `namespace` is the name the composition
 holds for itself, the namespace its overlays contribute to the
 composed library; a layer above gives a configuration no parent
