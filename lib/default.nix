@@ -106,7 +106,7 @@ let
 
   # The overlay fold, keeping each layer beside the lib: `layers` holds,
   # per entry in application order, the entry, the attrset its overlay
-  # returned (`result`) and the accumulation it received (`before`).
+  # returned (`result`) and the accumulation it received (`prev`).
   # Each is the value the fold used, so a reader of `layers` sees what
   # the lib was built from, and nothing is evaluated twice. Every overlay receives the finished
   # lib as `final` and the accumulation so far as `prev`, exactly as a
@@ -127,7 +127,7 @@ let
                 {
                   entry = e;
                   inherit result;
-                  before = acc.prev;
+                  inherit (acc) prev;
                 }
               ];
             }

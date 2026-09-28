@@ -268,8 +268,10 @@ Each event has `manifest` (the name path, empty for the root lib),
 `type`, `operation` (`registry` or `layer`), `key`, `index` (its
 position within its operation) and `origin` (`project`, and `file`
 where the entry was built from one; a lib overlay built from a file
-records it as `origin`). A layer event also carries, lazily, the
-attrset its overlay returned and the accumulation it received.
+records it as `origin`). A layer event also carries, lazily, the two
+sides of its overlay call `final: prev: result`: `result`, the
+attrset its overlay returned, and `prev`, the accumulation it
+received.
 `definers manifest [ "my-project" "helper" ]` reads them: the layers
 that define that path in order, the winner last, each with its value
 after the layer and its binding position when that lies in the

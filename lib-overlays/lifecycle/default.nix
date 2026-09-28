@@ -516,12 +516,12 @@ let
       positionIn = set: builtins.unsafeGetAttrPos last (get set parentPath);
       carried =
         event:
-        has event.before path
+        has event.prev path
         && (
           let
-            returned = positionIn event.defined;
-            received = positionIn event.before;
-            equal = builtins.tryEval (get event.defined path == get event.before path);
+            returned = positionIn event.result;
+            received = positionIn event.prev;
+            equal = builtins.tryEval (get event.result path == get event.prev path);
           in
           if returned != null || received != null then
             returned == received
@@ -531,14 +531,14 @@ let
     in
     builtins.concatMap (
       event:
-      if event.operation == "layer" && has event.defined path && !(carried event) then
+      if event.operation == "layer" && has event.result path && !(carried event) then
         let
-          position = positionIn event.defined;
+          position = positionIn event.result;
         in
         [
           {
             inherit (event) key index origin;
-            value = get event.defined path;
+            value = get event.result path;
             position = if within event.origin.file position then position else null;
           }
         ]
@@ -1185,11 +1185,12 @@ let
         # index within its operation and its origin, the project that
         # registered it (this project's name for a local entry) and
         # the file it was built from where one is known. A layer event
-        # also carries `defined`, the attrset its overlay returned (the
-        # names the layer defines, where it binds them and the values
-        # they had after it), and `before`, the accumulation it
-        # received, which tells a name it defines from one it carries
-        # over; `definers` reads both lazily.
+        # also carries the two sides of its overlay call,
+        # `final: prev: result`: `result`, the attrset its overlay
+        # returned (the names the layer defines, where it binds them
+        # and the values they had after it), and `prev`, the
+        # accumulation it received, which tells a name it defines from
+        # one it carries over; `definers` reads both lazily.
         originOf = entry: {
           project = if (entry.project or null) == null then name else entry.project;
           file = entry.origin or null;
@@ -1260,8 +1261,7 @@ let
                   project = null;
                   file = null;
                 };
-            defined = layer.result;
-            before = layer.before;
+            inherit (layer) result prev;
           }
         ) selectionLength;
         history =
