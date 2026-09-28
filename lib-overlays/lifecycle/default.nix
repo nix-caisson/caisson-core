@@ -1024,7 +1024,8 @@ let
         # capture.  `sources` are the pinned sources with each pin
         # recorded against the root, and `root` the tree's identity.
         # `name` is the declared namespace, absent when none is
-        # declared. The lib mkLib returns is the full lib of a root
+        # declared; `namespace` holds the same value (null when
+        # undeclared) until caisson reads `name`. The lib mkLib returns is the full lib of a root
         # declaration, so it is not childless and its chain is empty:
         # no parent, no ancestors, nothing consumed, and no children
         # until package configs are built under it.  Checks belong to
@@ -1041,6 +1042,7 @@ let
                   configs
                   defaultEcosystemSrc
                   entries
+                  namespace
                   projects
                   root
                   systems

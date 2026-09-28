@@ -249,7 +249,8 @@ entries prefixed, locals winning), `moduleProjects`, and the `configs` registrat
 as `caisson-core.configs`. `name` is the `namespace` the composition
 declares, the name it holds for itself and the namespace its overlays
 contribute to the composed library, and it is absent when none is
-declared; a layer above gives a configuration no parent declares that
+declared (`namespace` holds the same value, null when undeclared,
+until caisson reads `name`); a layer above gives a configuration no parent declares that
 name, since a name is otherwise the attribute a parent declares a
 child under. It is not passed anywhere; readers pull it back out of
 the composed library. `type` is `"lib"`. `entries` lists the
