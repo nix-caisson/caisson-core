@@ -249,8 +249,7 @@ entries prefixed, locals winning), `moduleProjects`, and the `configs` registrat
 as `caisson-core.configs`. `name` is the project's name as declared
 on `mkLib`, the name the composition holds for itself and the
 namespace its overlays contribute to the composed library, and it is
-absent when none is declared (`namespace`, the argument's former
-name, is still accepted in its place); a layer above gives a configuration no parent declares that
+absent when none is declared; a layer above gives a configuration no parent declares that
 name, since a name is otherwise the attribute a parent declares a
 child under. It is not passed anywhere; readers pull it back out of
 the composed library. `type` is `"lib"`. `entries` lists the
