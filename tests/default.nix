@@ -979,6 +979,7 @@ let
         manifest = composed.caisson-core.libManifest;
       in
       builtins.attrNames manifest == [
+        "_type"
         "configs"
         "defaultEcosystemSrc"
         "libOverlays"
@@ -1012,6 +1013,44 @@ let
       builtins.isAttrs composed.caisson-core.libManifest
       && composed.caisson-core.pkgsManifest == null
       && composed.caisson-core.evalManifest == null;
+
+    # manifestOf finds the manifest in each shape a file may return,
+    # and null where the value carries none.
+    lifecycleManifestOfFindsTheManifest =
+      let
+        inherit (core) manifestOf;
+        composed = core.mkLib {
+          sources = { };
+          namespace = "probe";
+        };
+        libManifest = composed.caisson-core.libManifest;
+        # A lib with a later slot filled, as a package set's or an
+        # evaluation's lib carries it.
+        withSlot =
+          slot: tag:
+          composed
+          // {
+            caisson-core = composed.caisson-core // {
+              ${slot} = {
+                _type = "caisson-manifest";
+                inherit tag;
+              };
+            };
+          };
+      in
+      libManifest._type == "caisson-manifest"
+      && manifestOf libManifest == libManifest
+      && manifestOf composed == libManifest
+      && manifestOf { lib = composed; } == libManifest
+      && manifestOf { caisson.manifest = libManifest; } == libManifest
+      && manifestOf { config.caisson.manifest = libManifest; } == libManifest
+      && (manifestOf (withSlot "pkgsManifest" "pkgs")).tag == "pkgs"
+      && (manifestOf { lib = withSlot "pkgsManifest" "pkgs"; }).tag == "pkgs"
+      && (manifestOf (withSlot "evalManifest" "eval")).tag == "eval"
+      && manifestOf { } == null
+      && manifestOf { caisson.manifest = { }; } == null
+      && manifestOf { config = 1; } == null
+      && manifestOf "a string" == null;
 
     lifecycleSystemsAreDeclaredOnMkLib =
       let

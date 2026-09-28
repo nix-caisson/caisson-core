@@ -173,7 +173,8 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three manifest slots
-(`libManifest`, `pkgsManifest`, `evalManifest`), plus `compose`,
+(`libManifest`, `pkgsManifest`, `evalManifest`) and `manifestOf`,
+plus `compose`,
 `resolve`, `importApply`, `callConsumerFlake`, and the pin readers
 `pins`. A registered overlay file takes the closure
 attrset
@@ -254,7 +255,13 @@ is not passed anywhere; readers pull it back out of the composed
 library. There is a slot per evaluation phase: `libManifest` is
 filled here, and `pkgsManifest` and `evalManifest` are present and
 null, for the layers that build package sets and module evaluations
-to fill on the libraries they hand out. Higher
+to fill on the libraries they hand out. Every manifest carries
+`_type = "caisson-manifest"`, and `manifestOf` finds one in whatever
+a file returns: a manifest, an attrset carrying `caisson.manifest`,
+an evaluated configuration carrying `config.caisson.manifest`, or a
+library (or a package set, through `pkgs.lib`) carrying the slots,
+where the last filled slot is the manifest. It returns null when the
+value carries none. Higher
 layers project a flake's `libOverlays` and `modules` outputs from it,
 and the `projects` argument consumes those projections one level
 down, which is how dictionaries populate across flakes. The manifest
