@@ -212,6 +212,10 @@ let
               imports = applied.imports or [ ];
               overlay = applied.overlay;
             }
+            # The file the entry was built from, recorded as its origin
+            # in the manifest's history; an entry built from a function
+            # has none.
+            // (if requiresImport then { origin = builtins.toString freeformOverlay; } else { })
           else
             throw ''
               ${provenance}After the closure arg list, a lib overlay is an
@@ -472,6 +476,75 @@ let
       found = builtins.filter isManifest candidates;
     in
     if found == [ ] then null else builtins.head found;
+
+  # The layers that define a name, from a manifest's history: given a
+  # manifest and an attribute path (`[ "my-project" "helper" ]`), the
+  # layer events whose layer defines that path, in composition order,
+  # so the last is the winner and the rest are shadowed. A layer that
+  # returns `prev.x // { ... }` carries the names already under `x`
+  # without defining them: a name counts as carried when it has the
+  # same binding position in what the layer returned and in what it
+  # received, or, with no position on either side, an equal value.
+  # Each carries
+  # the event's key, index and origin, the value the path had after
+  # that layer, and where the layer binds the name, from
+  # `unsafeGetAttrPos`. A position is kept only when it lies within
+  # the layer's origin file; a name a layer computes rather than
+  # writes has no position there, or one inside the library that
+  # computed it, and is reported with the layer's file alone.
+  definers =
+    manifest: path:
+    let
+      has =
+        set: p:
+        p == [ ]
+        || (
+          builtins.isAttrs set && set ? ${builtins.head p} && has set.${builtins.head p} (builtins.tail p)
+        );
+      get = set: p: builtins.foldl' (acc: k: acc.${k}) set p;
+      depth = builtins.length path;
+      last = builtins.elemAt path (depth - 1);
+      parentPath = builtins.genList (i: builtins.elemAt path i) (depth - 1);
+      within =
+        file: position:
+        position != null
+        && file != null
+        && (
+          position.file == file
+          || builtins.substring 0 (builtins.stringLength file + 1) position.file == file + "/"
+        );
+      positionIn = set: builtins.unsafeGetAttrPos last (get set parentPath);
+      carried =
+        event:
+        has event.before path
+        && (
+          let
+            returned = positionIn event.defined;
+            received = positionIn event.before;
+            equal = builtins.tryEval (get event.defined path == get event.before path);
+          in
+          if returned != null || received != null then
+            returned == received
+          else
+            equal.success && equal.value
+        );
+    in
+    builtins.concatMap (
+      event:
+      if event.operation == "layer" && has event.defined path && !(carried event) then
+        let
+          position = positionIn event.defined;
+        in
+        [
+          {
+            inherit (event) key index origin;
+            value = get event.defined path;
+            position = if within event.origin.file position then position else null;
+          }
+        ]
+      else
+        [ ]
+    ) manifest.history;
 
   # Build a composition-bound, class-parameterized mkModule.
   # `finalLib` is the composed fixpoint (for closure-lib), bound
@@ -1042,6 +1115,7 @@ let
                   configs
                   defaultEcosystemSrc
                   entries
+                  history
                   projects
                   root
                   systems
@@ -1090,15 +1164,117 @@ let
             opaque = true;
           }) selectionMeta.tailLength;
 
-        finalLib =
-          (composeRegistered { inherit published; } (
-            importedLibOverlays
-            ++ [
-              projectModulesOverlay
-              localModulesOverlay
-              manifestOverlay
-            ]
-          )).lib;
+        composition = composeRegistered { inherit published; } (
+          importedLibOverlays
+          ++ [
+            projectModulesOverlay
+            localModulesOverlay
+            manifestOverlay
+          ]
+        );
+        finalLib = composition.lib;
+
+        # The manifest's `history`: the events recorded on the way to
+        # this lib, in stage order. The lib overlay registry is grafted
+        # at the core stage, so its registrations come first; then the
+        # selected entries compose, one `layer` event each in
+        # composition order; then the `modules`, `configs` and
+        # `pkgOverlays` registrations are grafted at the bootstrap
+        # stage. Each event names its manifest (the empty name path:
+        # this is the root lib), its type and operation, its key, its
+        # index within its operation and its origin, the project that
+        # registered it (this project's name for a local entry) and
+        # the file it was built from where one is known. A layer event
+        # also carries `defined`, the attrset its overlay returned (the
+        # names the layer defines, where it binds them and the values
+        # they had after it), and `before`, the accumulation it
+        # received, which tells a name it defines from one it carries
+        # over; `definers` reads both lazily.
+        originOf = entry: {
+          project = if (entry.project or null) == null then name else entry.project;
+          file = entry.origin or null;
+        };
+        libOverlayRegistrations = builtins.map (n: {
+          key = "libOverlays.${n}";
+          origin = originOf registeredLibOverlays.${n};
+        }) (builtins.attrNames registeredLibOverlays);
+        bootstrapRegistrations =
+          builtins.concatMap (
+            class:
+            builtins.map (n: {
+              key = "modules.${class}.${n}";
+              origin = {
+                project =
+                  let
+                    project = registeredModuleProjects.${class}.${n} or null;
+                  in
+                  if project == null then name else project;
+                file = null;
+              };
+            }) (builtins.attrNames registeredModules.${class})
+          ) (builtins.attrNames registeredModules)
+          ++ builtins.concatMap (
+            class:
+            builtins.map (n: {
+              key = "configs.${class}.${n}";
+              origin = {
+                project = name;
+                file = null;
+              };
+            }) (builtins.attrNames configs.${class})
+          ) (builtins.attrNames configs)
+          ++ builtins.map (n: {
+            key = "pkgOverlays.${n}";
+            origin = originOf registeredPkgOverlays.${n};
+          }) (builtins.attrNames registeredPkgOverlays);
+        registryEvent = index: registration: {
+          manifest = [ ];
+          type = "lib";
+          operation = "registry";
+          inherit index;
+          inherit (registration) key origin;
+        };
+        selectionLength = builtins.length selectionMeta.order + selectionMeta.tailLength;
+        keyedLength = builtins.length selectionMeta.order;
+        layerEvents = builtins.genList (
+          index:
+          let
+            layer = builtins.elemAt composition.layers index;
+            key =
+              if (layer.entry.key or null) != null then
+                layer.entry.key
+              else
+                "keyless/${toString (index - keyedLength)}";
+            registered = registeredLibOverlays.${key} or null;
+          in
+          {
+            manifest = [ ];
+            type = "lib";
+            operation = "layer";
+            inherit index key;
+            origin =
+              if registered != null then
+                originOf registered
+              else
+                {
+                  project = null;
+                  file = null;
+                };
+            defined = layer.result;
+            before = layer.before;
+          }
+        ) selectionLength;
+        history =
+          builtins.genList (
+            i: registryEvent i (builtins.elemAt libOverlayRegistrations i)
+          ) (builtins.length libOverlayRegistrations)
+          ++ layerEvents
+          ++ builtins.genList (
+            i:
+            registryEvent (builtins.length libOverlayRegistrations + i) (
+              builtins.elemAt bootstrapRegistrations i
+            )
+          ) (builtins.length bootstrapRegistrations);
 
       in
       # Surface argument-shape errors as soon as the result is used,
@@ -1127,6 +1303,7 @@ in
         contributeClasses
         contributeModules
         coreEntries
+        definers
         importApply
         manifestOf
         mkExtendedLib

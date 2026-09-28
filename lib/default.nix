@@ -104,30 +104,55 @@ let
       tail = [ ];
     } entries;
 
-  fix =
-    f:
+  # The overlay fold, keeping each layer beside the lib: `layers` holds,
+  # per entry in application order, the entry, the attrset its overlay
+  # returned (`result`) and the accumulation it received (`before`).
+  # Each is the value the fold used, so a reader of `layers` sees what
+  # the lib was built from, and nothing is evaluated twice. Every overlay receives the finished
+  # lib as `final` and the accumulation so far as `prev`, exactly as a
+  # fixpoint of `extends` would give it.
+  applyEntries =
+    entryList:
     let
-      x = f x;
+      folded =
+        builtins.foldl'
+          (
+            acc: e:
+            let
+              result = e.overlay lib acc.prev;
+            in
+            {
+              prev = acc.prev // result;
+              layers = acc.layers ++ [
+                {
+                  entry = e;
+                  inherit result;
+                  before = acc.prev;
+                }
+              ];
+            }
+          )
+          {
+            prev = { };
+            layers = [ ];
+          }
+          entryList;
+      lib = folded.prev;
     in
-    x;
-
-  extends =
-    overlay: f: final:
-    let
-      prev = f final;
-    in
-    prev // overlay final prev;
-
-  applyEntries = entryList: fix (builtins.foldl' (f: e: extends e.overlay f) (_final: { }) entryList);
+    {
+      inherit lib;
+      inherit (folded) layers;
+    };
 
   compose =
     { entries }:
     let
       walked = walk entries;
       keyedEntries = builtins.map (k: walked.winners.${k}) walked.order;
+      applied = applyEntries (keyedEntries ++ walked.tail);
     in
     {
-      lib = applyEntries (keyedEntries ++ walked.tail);
+      inherit (applied) lib layers;
       meta = {
         inherit (walked) winners order;
         tailLength = builtins.length walked.tail;
@@ -162,7 +187,8 @@ let
         name:
         let
           key = "caisson-core/${name}";
-          applied = import (../lib-overlays + "/${name}") {
+          file = ../lib-overlays + "/${name}";
+          applied = import file {
             closure-inputs = sources;
             inherit entries compose coreEntries;
           };
@@ -173,6 +199,7 @@ let
             inherit key;
             imports = applied.imports or [ ];
             overlay = applied.overlay;
+            origin = toString file;
           };
         }
       ) names

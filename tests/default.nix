@@ -986,6 +986,7 @@ let
         "configs"
         "defaultEcosystemSrc"
         "entries"
+        "history"
         "inputs"
         "libOverlays"
         "moduleProjects"
@@ -1155,6 +1156,105 @@ let
         false
         false
       ];
+
+    # `history` records the lib overlay registrations (the core
+    # stage), then one layer per selected entry in composition order,
+    # then the module registrations (the bootstrap stage), each indexed
+    # within its operation and carrying its origin.
+    lifecycleHistoryRecordsRegistrationsAndLayers =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          libOverlays = mkLibOverlay: {
+            base = mkLibOverlay ./fixtures/history-overlays/base;
+            top = mkLibOverlay ./fixtures/history-overlays/top;
+          };
+          libOverlayImports = overlays: [
+            overlays.base
+            overlays.top
+          ];
+          modules = composedLib: {
+            nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { });
+          };
+        };
+        manifest = composed.caisson-core.libManifest;
+        history = manifest.history;
+        ofOperation = operation: builtins.filter (e: e.operation == operation) history;
+        layer = key: builtins.head (builtins.filter (e: e.operation == "layer" && e.key == key) (ofOperation "layer"));
+      in
+      builtins.map (e: "${e.operation}:${e.key}") history
+      ==
+        builtins.map (n: "registry:libOverlays.${n}") (builtins.attrNames manifest.libOverlays)
+        ++ builtins.map (k: "layer:${k}") (
+          coreNames
+          ++ [
+            "base"
+            "top"
+          ]
+        )
+        ++ [ "registry:modules.nixos.local" ]
+      && builtins.all (e: e.manifest == [ ] && e.type == "lib") history
+      && builtins.map (e: e.index) (ofOperation "layer")
+      == builtins.genList (i: i) (builtins.length (ofOperation "layer"))
+      && builtins.map (e: e.index) (ofOperation "registry")
+      == builtins.genList (i: i) (builtins.length (ofOperation "registry"))
+      && (layer "base").origin == {
+        project = "probe-project";
+        file = toString ./fixtures/history-overlays/base;
+      }
+      && (layer "caisson-core/lifecycle").origin.project == "caisson-core";
+
+    # `definers` names every layer that defines a path, the winner last,
+    # with the value after each layer and its binding position when the
+    # position lies in the layer's file. A layer returning
+    # `prev.x // { ... }` carries the names under `x` without defining
+    # them, and a computed name reports no position.
+    lifecycleDefinersNameTheWinnerAndTheShadowed =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = mkLibOverlay: {
+            base = mkLibOverlay ./fixtures/history-overlays/base;
+            top = mkLibOverlay ./fixtures/history-overlays/top;
+          };
+          libOverlayImports = overlays: [
+            overlays.base
+            overlays.top
+          ];
+        };
+        manifest = composed.caisson-core.libManifest;
+        definersOf = path: core.definers manifest path;
+        greeting = definersOf [
+          "probe"
+          "greeting"
+        ];
+        made = definersOf [
+          "probe"
+          "made"
+        ];
+        computed = definersOf [
+          "probe"
+          "computed"
+        ];
+      in
+      builtins.map (d: d.key) greeting == [
+        "base"
+        "top"
+      ]
+      && builtins.map (d: d.value) greeting == [
+        "from base"
+        "from top"
+      ]
+      && composed.probe.greeting == "from top"
+      && builtins.all (
+        d: d.position.file == toString ./fixtures/history-overlays + "/${d.key}/default.nix"
+      ) greeting
+      && builtins.map (d: d.key) made == [ "base" ]
+      && (builtins.head made).position.line == 8
+      && builtins.map (d: d.key) computed == [ "base" ]
+      && (builtins.head computed).position == null
+      && definersOf [ "absent" ] == [ ];
 
     lifecycleNameMustBeAString =
       throws (
