@@ -544,8 +544,12 @@ let
       # pins.gitRoot returns it; null for a composition that is not a
       # top, a library composed inside a test or a check.
       root ? null,
-      # The namespace this composition contributes to the composed
-      # library, e.g. "my-project".
+      # The project's name, e.g. "my-project": the name of the
+      # parentless configuration and the namespace its overlays
+      # contribute to the composed library.
+      name ? null,
+      # The same, under the argument's former name; accepted until
+      # the callers have moved to `name`.
       namespace ? null,
       # The platforms the tree builds on.
       systems ? null,
@@ -652,7 +656,21 @@ let
         rawEcosystems = given "defaultEcosystemSrc" { };
         rawProjects = given "projects" { };
         rawSystems = resolvedArgs.systems or null;
-        rawNamespace = resolvedArgs.namespace or null;
+        rawName =
+          let
+            given = resolvedArgs.name or null;
+            former = resolvedArgs.namespace or null;
+          in
+          if given != null && former != null then
+            throw ''
+              mkLib takes the project's name once, as `name`; this call passes both
+              `name` and `namespace` (the former name of the same argument).
+              Remove `namespace`.
+            ''
+          else if given != null then
+            given
+          else
+            former;
 
         # The platforms the tree builds on, declared once here and
         # read from the manifest by whatever needs a system list
@@ -669,22 +687,22 @@ let
               `[ "x86_64-linux" ]`), but got a ${builtins.typeOf rawSystems}.
             '';
 
-        # The namespace this composition contributes to the composed
-        # library: the one name the tree holds for itself, declared
-        # once here and read from the manifest. A configuration no
-        # parent declares takes it as its name, since a name is
-        # otherwise the attribute a parent declares a child under and
-        # a parentless evaluation has no such attribute. Null when the
-        # composition declares none, which leaves such a configuration
-        # unnamed.
-        namespace =
-          if rawNamespace == null || builtins.isString rawNamespace then
-            rawNamespace
+        # The project's name: the one name the tree holds for itself,
+        # declared once here and read from the manifest. A
+        # configuration no parent declares takes it as its name, since
+        # a name is otherwise the attribute a parent declares a child
+        # under and a parentless evaluation has no such attribute, and
+        # the project's overlays contribute to the composed library
+        # under it. Null when the composition declares none, which
+        # leaves such a configuration unnamed.
+        name =
+          if rawName == null || builtins.isString rawName then
+            rawName
           else
             throw ''
-              mkLib expects `namespace` to be the string naming the namespace this
-              composition contributes to the composed library (e.g. `"my-project"`,
-              read as `lib.my-project`), but got a ${builtins.typeOf rawNamespace}.
+              mkLib expects `name` to be the string naming the project, which is
+              also the namespace it contributes to the composed library (e.g.
+              `"my-project"`, read as `lib.my-project`), but got a ${builtins.typeOf rawName}.
             '';
 
         # Consumed projects: whole upstream contributions, registered
@@ -1023,7 +1041,7 @@ let
         # hand-registered ones; `projects` keeps the raw per-project
         # capture.  `sources` are the pinned sources with each pin
         # recorded against the root, and `root` the tree's identity.
-        # `name` is the declared namespace, absent when none is
+        # `name` is the declared project name, absent when none is
         # declared. The lib mkLib returns is the full lib of a root
         # declaration, so it is not childless and its chain is empty:
         # no parent, no ancestors, nothing consumed, and no children
@@ -1057,7 +1075,7 @@ let
                 nearest = { };
                 children = { };
               }
-              // (if namespace == null then { } else { name = namespace; });
+              // (if name == null then { } else { inherit name; });
             };
           };
         };
@@ -1114,7 +1132,7 @@ let
         (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
         (builtins.isAttrs rawProjects || projects)
         (rawSystems == null || builtins.isList rawSystems || systems)
-        (rawNamespace == null || builtins.isString rawNamespace || namespace)
+        (rawName == null || builtins.isString rawName || name)
       ]
     );
 
