@@ -117,9 +117,12 @@ let
             }
           ];
     in
-    overlays: (compose { entries = builtins.concatMap flattenOverlay overlays; }).lib;
+    # The whole `compose` result: the lib, and `meta` with the keyed
+    # order, which is computed from keys and imports alone, so reading
+    # it applies no overlay.
+    overlays: compose { entries = builtins.concatMap flattenOverlay overlays; };
 
-  mkExtendedLib = composeRegistered { };
+  mkExtendedLib = overlays: (composeRegistered { } overlays).lib;
 
   # The entry that brings nixpkgs' library into a composition: the
   # functions of the source supplying the `nixpkgs-lib` part of the
@@ -1020,9 +1023,13 @@ let
         # hand-registered ones; `projects` keeps the raw per-project
         # capture.  `sources` are the pinned sources with each pin
         # recorded against the root, and `root` the tree's identity.
-        # The record's `inputs`, the manifests consumed, is not filled
-        # yet.  Checks belong to the export side (integrations), not
-        # here.
+        # `name` is the declared namespace, absent when none is
+        # declared; `namespace` holds the same value (null when
+        # undeclared) until caisson reads `name`. The lib mkLib returns is the full lib of a root
+        # declaration, so it is not childless and its chain is empty:
+        # no parent, no ancestors, nothing consumed, and no children
+        # until package configs are built under it.  Checks belong to
+        # the export side (integrations), not here.
         manifestOverlay = {
           imports = [ ];
           overlay = _final: prev: {
@@ -1030,9 +1037,11 @@ let
               inherit configs;
               libManifest = {
                 _type = "caisson-manifest";
+                type = "lib";
                 inherit
                   configs
                   defaultEcosystemSrc
+                  entries
                   namespace
                   projects
                   root
@@ -1043,29 +1052,54 @@ let
                 modules = registeredModules;
                 moduleProjects = registeredModuleProjects;
                 pkgOverlays = registeredPkgOverlays;
-              };
+                childless = false;
+                inputs = [ ];
+                parent = null;
+                ancestors = [ ];
+                nearest = { };
+                children = { };
+              }
+              // (if namespace == null then { } else { name = namespace; });
             };
           };
         };
 
+        published = builtins.listToAttrs (
+          builtins.map (name: {
+            inherit name;
+            value = registeredLibOverlays.${name};
+          }) publishedNames
+        );
+
+        # The manifest's `entries`: the selection's keys in composition
+        # order, caisson-core's forced entries first. A key that names
+        # no registry entry (a keyless import's synthesized key, or a
+        # key an overlay built elsewhere carried in) is an ad hoc
+        # entry and marked opaque, as is each keyless entry, which the
+        # composition applies after the keyed ones. The walk is over
+        # the selection alone: the registrations and the manifest
+        # compose after it as caisson-core's own recording, not as
+        # entries.
+        selectionMeta = (composeRegistered { inherit published; } importedLibOverlays).meta;
+        entries =
+          builtins.map (key: {
+            inherit key;
+            opaque = !(registeredLibOverlays ? ${key});
+          }) selectionMeta.order
+          ++ builtins.genList (i: {
+            key = "keyless/${toString i}";
+            opaque = true;
+          }) selectionMeta.tailLength;
+
         finalLib =
-          composeRegistered
-            {
-              published = builtins.listToAttrs (
-                builtins.map (name: {
-                  inherit name;
-                  value = registeredLibOverlays.${name};
-                }) publishedNames
-              );
-            }
-            (
-              importedLibOverlays
-              ++ [
-                projectModulesOverlay
-                localModulesOverlay
-                manifestOverlay
-              ]
-            );
+          (composeRegistered { inherit published; } (
+            importedLibOverlays
+            ++ [
+              projectModulesOverlay
+              localModulesOverlay
+              manifestOverlay
+            ]
+          )).lib;
 
       in
       # Surface argument-shape errors as soon as the result is used,
