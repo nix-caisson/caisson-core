@@ -990,7 +990,6 @@ let
         "libOverlays"
         "moduleProjects"
         "modules"
-        "namespace"
         "nearest"
         "parent"
         "pkgOverlays"
@@ -1012,7 +1011,6 @@ let
       && manifest.root == theRoot
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
-      && manifest.namespace == null
       && builtins.attrNames manifest.libOverlays == [ "a" ] ++ coreNames ++ [ "nixpkgs-lib" ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
