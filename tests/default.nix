@@ -980,24 +980,37 @@ let
       in
       builtins.attrNames manifest == [
         "_type"
+        "ancestors"
+        "childless"
+        "children"
         "configs"
         "defaultEcosystemSrc"
+        "entries"
+        "inputs"
         "libOverlays"
         "moduleProjects"
         "modules"
-        "namespace"
+        "nearest"
+        "parent"
         "pkgOverlays"
         "projects"
         "root"
         "sources"
         "systems"
+        "type"
       ]
+      && manifest.type == "lib"
+      && manifest.childless == false
+      && manifest.inputs == [ ]
+      && manifest.parent == null
+      && manifest.ancestors == [ ]
+      && manifest.nearest == { }
+      && manifest.children == { }
       && manifest.pkgOverlays == { }
       && manifest.sources == theSources
       && manifest.root == theRoot
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
-      && manifest.namespace == null
       && builtins.attrNames manifest.libOverlays == [ "a" ] ++ coreNames ++ [ "nixpkgs-lib" ]
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
@@ -1081,6 +1094,7 @@ let
         }
       );
 
+    # The root lib manifest records the declared namespace as `name`.
     lifecycleNamespaceIsDeclaredOnMkLib =
       let
         composed = core.mkLib {
@@ -1088,7 +1102,7 @@ let
           namespace = "my-project";
         };
       in
-      composed.caisson-core.libManifest.namespace == "my-project";
+      composed.caisson-core.libManifest.name == "my-project";
 
     lifecycleNamespaceIsAbsentWhenUndeclared =
       let
@@ -1096,7 +1110,50 @@ let
           sources = { };
         };
       in
-      composed.caisson-core.libManifest.namespace == null;
+      !(composed.caisson-core.libManifest ? name);
+
+    # `entries` lists the selection's keys in composition order:
+    # caisson-core's forced entries first, then the selected entries
+    # with each one's imports before it. A key that names no registry
+    # entry is opaque.
+    lifecycleManifestEntriesFollowCompositionOrder =
+      let
+        adHoc = {
+          key = "ad-hoc";
+          imports = [ ];
+          overlay = _final: _prev: { };
+        };
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = mkLibOverlay: {
+            base = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
+            top = mkLibOverlay (
+              { ... }:
+              {
+                imports = [ adHoc ];
+                overlay = _final: _prev: { };
+              }
+            );
+          };
+          libOverlayImports = overlays: [
+            overlays.top
+            overlays.base
+          ];
+        };
+        entries = composed.caisson-core.libManifest.entries;
+      in
+      builtins.map (e: e.key) entries == coreNames ++ [
+        "ad-hoc"
+        "top"
+        "base"
+      ]
+      && builtins.map (e: e.opaque) entries
+      == builtins.map (_: false) coreNames
+      ++ [
+        true
+        false
+        false
+      ];
 
     lifecycleNamespaceMustBeAString =
       throws (

@@ -242,17 +242,24 @@ The manifest is the composition's self-description, recorded at
 `caisson-core.libManifest`: `sources` (a directory reader's pin files
 stated relative to the root when the directory lies in the root's
 tree, `pin.dir` kept otherwise), `root` (null for a composition that
-is not a top), `defaultEcosystemSrc`, `systems`, `namespace`, the raw
+is not a top), `defaultEcosystemSrc`, `systems`, `name`, the raw
 `projects` capture, the registered
 `libOverlays`, `modules` and `pkgOverlays` dictionaries (project
 entries prefixed, locals winning), `moduleProjects`, and the `configs` registration, which also comes back
-as `caisson-core.configs`. `namespace` is the name the composition
-holds for itself, the namespace its overlays contribute to the
-composed library; a layer above gives a configuration no parent
-declares that name, since a name is otherwise the attribute a parent
-declares a child under. It
-is not passed anywhere; readers pull it back out of the composed
-library. There is a slot per evaluation phase: `libManifest` is
+as `caisson-core.configs`. `name` is the `namespace` the composition
+declares, the name it holds for itself and the namespace its overlays
+contribute to the composed library, and it is absent when none is
+declared; a layer above gives a configuration no parent declares that
+name, since a name is otherwise the attribute a parent declares a
+child under. It is not passed anywhere; readers pull it back out of
+the composed library. `type` is `"lib"`. `entries` lists the
+selection in composition order, caisson-core's forced entries first,
+each as `{ key, opaque }`; an entry is opaque when its key names no
+registry entry (an overlay imported by value rather than
+registered), and a keyless entry gets a synthesized `keyless/<n>`
+key. The lib `mkLib` returns is the full lib of a root declaration,
+so `childless` is false, `parent` is null, and `ancestors`, `inputs`,
+`nearest` and `children` are empty. There is a slot per evaluation phase: `libManifest` is
 filled here, and `pkgsManifest` and `evalManifest` are present and
 null, for the layers that build package sets and module evaluations
 to fill on the libraries they hand out. Every manifest carries
