@@ -173,7 +173,8 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three manifest slots
-(`libManifest`, `pkgsManifest`, `evalManifest`) and `manifestOf`,
+(`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf` and
+`definers`,
 plus `compose`,
 `resolve`, `importApply`, `callConsumerFlake`, and the pin readers
 `pins`. A registered overlay file takes the closure
@@ -259,7 +260,23 @@ registry entry (an overlay imported by value rather than
 registered), and a keyless entry gets a synthesized `keyless/<n>`
 key. The lib `mkLib` returns is the full lib of a root declaration,
 so `childless` is false, `parent` is null, and `ancestors`, `inputs`,
-`nearest` and `children` are empty. There is a slot per evaluation phase: `libManifest` is
+`nearest` and `children` are empty. `history` lists the events
+recorded on the way to the lib, in stage order: the lib overlay
+registrations, one `layer` event per selected entry in composition
+order, then the `modules`, `configs` and `pkgOverlays` registrations.
+Each event has `manifest` (the name path, empty for the root lib),
+`type`, `operation` (`registry` or `layer`), `key`, `index` (its
+position within its operation) and `origin` (`project`, and `file`
+where the entry was built from one; a lib overlay built from a file
+records it as `origin`). A layer event also carries, lazily, the two
+sides of its overlay call `final: prev: result`: `result`, the
+attrset its overlay returned, and `prev`, the accumulation it
+received.
+`definers manifest [ "my-project" "helper" ]` reads them: the layers
+that define that path in order, the winner last, each with its value
+after the layer and its binding position when that lies in the
+layer's file. A layer returning `prev.x // { ... }` carries the names
+under `x` without defining them. There is a slot per evaluation phase: `libManifest` is
 filled here, and `pkgsManifest` and `evalManifest` are present and
 null, for the layers that build package sets and module evaluations
 to fill on the libraries they hand out. Every manifest carries
