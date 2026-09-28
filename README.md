@@ -118,9 +118,9 @@ core.mkLib {
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
                                       # null when absent
-  namespace = "my-project";           # the namespace this composition
-                                      # contributes to the composed library;
-                                      # null when absent
+  name = "my-project";                # the project's name, also the
+                                      # namespace it contributes to the
+                                      # composed library; null when absent
 }
 ```
 
@@ -246,10 +246,11 @@ is not a top), `defaultEcosystemSrc`, `systems`, `name`, the raw
 `projects` capture, the registered
 `libOverlays`, `modules` and `pkgOverlays` dictionaries (project
 entries prefixed, locals winning), `moduleProjects`, and the `configs` registration, which also comes back
-as `caisson-core.configs`. `name` is the `namespace` the composition
-declares, the name it holds for itself and the namespace its overlays
-contribute to the composed library, and it is absent when none is
-declared; a layer above gives a configuration no parent declares that
+as `caisson-core.configs`. `name` is the project's name as declared
+on `mkLib`, the name the composition holds for itself and the
+namespace its overlays contribute to the composed library, and it is
+absent when none is declared (`namespace`, the argument's former
+name, is still accepted in its place); a layer above gives a configuration no parent declares that
 name, since a name is otherwise the attribute a parent declares a
 child under. It is not passed anywhere; readers pull it back out of
 the composed library. `type` is `"lib"`. `entries` lists the

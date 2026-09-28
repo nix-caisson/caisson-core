@@ -366,6 +366,7 @@ let
       builtins.functionArgs core.mkLib == {
         sources = false;
         root = true;
+        name = true;
         namespace = true;
         systems = true;
         defaultEcosystemSrc = true;
@@ -1034,7 +1035,7 @@ let
         inherit (core) manifestOf;
         composed = core.mkLib {
           sources = { };
-          namespace = "probe";
+          name = "probe";
         };
         libManifest = composed.caisson-core.libManifest;
         # A lib with a later slot filled, as a package set's or an
@@ -1094,17 +1095,33 @@ let
         }
       );
 
-    # The root lib manifest records the declared namespace as `name`.
-    lifecycleNamespaceIsDeclaredOnMkLib =
+    # The project's name is declared once on mkLib and recorded as
+    # `name` in the root lib manifest.
+    lifecycleNameIsDeclaredOnMkLib =
       let
         composed = core.mkLib {
           sources = { };
-          namespace = "my-project";
+          name = "my-project";
         };
       in
       composed.caisson-core.libManifest.name == "my-project";
 
-    lifecycleNamespaceIsAbsentWhenUndeclared =
+    # `namespace`, the argument's former name, still declares it, and
+    # passing both is refused.
+    lifecycleNameAcceptsTheFormerArgument =
+      (core.mkLib {
+        sources = { };
+        namespace = "my-project";
+      }).caisson-core.libManifest.name == "my-project"
+      && throws (
+        core.mkLib {
+          sources = { };
+          name = "my-project";
+          namespace = "my-project";
+        }
+      );
+
+    lifecycleNameIsAbsentWhenUndeclared =
       let
         composed = core.mkLib {
           sources = { };
@@ -1155,17 +1172,17 @@ let
         false
       ];
 
-    lifecycleNamespaceMustBeAString =
+    lifecycleNameMustBeAString =
       throws (
         core.mkLib {
           sources = { };
-          namespace = [ "my-project" ];
+          name = [ "my-project" ];
         }
       )
       && throws (
         core.mkLib {
           sources = { };
-          namespace = 1;
+          name = 1;
         }
       );
 
