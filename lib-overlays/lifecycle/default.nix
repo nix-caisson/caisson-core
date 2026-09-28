@@ -548,9 +548,6 @@ let
       # parentless configuration and the namespace its overlays
       # contribute to the composed library.
       name ? null,
-      # The same, under the argument's former name; accepted until
-      # the callers have moved to `name`.
-      namespace ? null,
       # The platforms the tree builds on.
       systems ? null,
       # The tree's default source per ecosystem, by exact name (the
@@ -656,21 +653,7 @@ let
         rawEcosystems = given "defaultEcosystemSrc" { };
         rawProjects = given "projects" { };
         rawSystems = resolvedArgs.systems or null;
-        rawName =
-          let
-            given = resolvedArgs.name or null;
-            former = resolvedArgs.namespace or null;
-          in
-          if given != null && former != null then
-            throw ''
-              mkLib takes the project's name once, as `name`; this call passes both
-              `name` and `namespace` (the former name of the same argument).
-              Remove `namespace`.
-            ''
-          else if given != null then
-            given
-          else
-            former;
+        rawName = resolvedArgs.name or null;
 
         # The platforms the tree builds on, declared once here and
         # read from the manifest by whatever needs a system list

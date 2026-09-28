@@ -367,7 +367,6 @@ let
         sources = false;
         root = true;
         name = true;
-        namespace = true;
         systems = true;
         defaultEcosystemSrc = true;
         projects = true;
@@ -1105,21 +1104,6 @@ let
         };
       in
       composed.caisson-core.libManifest.name == "my-project";
-
-    # `namespace`, the argument's former name, still declares it, and
-    # passing both is refused.
-    lifecycleNameAcceptsTheFormerArgument =
-      (core.mkLib {
-        sources = { };
-        namespace = "my-project";
-      }).caisson-core.libManifest.name == "my-project"
-      && throws (
-        core.mkLib {
-          sources = { };
-          name = "my-project";
-          namespace = "my-project";
-        }
-      );
 
     lifecycleNameIsAbsentWhenUndeclared =
       let
