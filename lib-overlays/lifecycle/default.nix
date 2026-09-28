@@ -438,6 +438,38 @@ let
       };
     };
 
+  # Find the manifest in whatever a file returns: a manifest itself,
+  # an attrset carrying `caisson.manifest`, an evaluated configuration
+  # carrying `config.caisson.manifest`, or a lib (or a package set,
+  # through `pkgs.lib`) carrying the phase slots, where the last
+  # filled slot is the manifest.  Null when the value carries none.
+  manifestOf =
+    value:
+    let
+      isManifest = v: builtins.isAttrs v && (v._type or null) == "caisson-manifest";
+      # The last filled of a composed lib's phase slots, or null.
+      lastSlot =
+        composed:
+        let
+          slots = composed.caisson-core;
+        in
+        if slots.evalManifest or null != null then
+          slots.evalManifest
+        else if slots.pkgsManifest or null != null then
+          slots.pkgsManifest
+        else
+          slots.libManifest or null;
+      candidates = [
+        value
+        (value.caisson.manifest or null)
+        (value.config.caisson.manifest or null)
+        (if builtins.isAttrs value && value ? caisson-core then lastSlot value else null)
+        (if builtins.isAttrs value && value ? lib.caisson-core then lastSlot value.lib else null)
+      ];
+      found = builtins.filter isManifest candidates;
+    in
+    if found == [ ] then null else builtins.head found;
+
   # Build a composition-bound, class-parameterized mkModule.
   # `finalLib` is the composed fixpoint (for closure-lib), bound
   # lazily; a module reaches the registry of the composition that
@@ -997,6 +1029,7 @@ let
             caisson-core = (prev.caisson-core or { }) // {
               inherit configs;
               libManifest = {
+                _type = "caisson-manifest";
                 inherit
                   configs
                   defaultEcosystemSrc
@@ -1062,6 +1095,7 @@ in
         contributeModules
         coreEntries
         importApply
+        manifestOf
         mkExtendedLib
         mkLib
         mkNixpkgsLibEntry
