@@ -720,8 +720,8 @@ let
           in
           if value == null then default else value;
 
-        rawModules = given "modules" (composedLib: { });
-        rawConfigs = given "configs" (composedLib: { });
+        rawModules = given "modules" (_lib: { });
+        rawConfigs = given "configs" (_lib: { });
         rawLibOverlays = given "libOverlays" (mkLibOverlay: { });
         rawPkgOverlays = given "pkgOverlays" (mkPkgOverlay: { });
         rawLibOverlayImports = given "libOverlayImports" (
@@ -924,10 +924,9 @@ let
             rawModules bootstrapLib
           else
             throw ''
-              mkLib expects `modules` to be a function taking the composed
-              library (`composedLib: { ... }`), but got a ${builtins.typeOf rawModules}. Take
-              the argument and ignore it (`_composedLib: { ... }`) if you do not need
-              it.
+              mkLib expects `modules` to be a function taking the bootstrap
+              library (`lib: { ... }`), but got a ${builtins.typeOf rawModules}. Take
+              the argument and ignore it (`_lib: { ... }`) if you do not need it.
             '';
         # The configurations of this tree, keyed by module class then
         # name (`configs/<class>/<name>` on disk): the modules a top
@@ -939,7 +938,7 @@ let
             rawConfigs bootstrapLib
           else
             throw ''
-              mkLib expects `configs` to be a function taking the composed
+              mkLib expects `configs` to be a function taking the bootstrap
               library (`lib: { ... }`), but got a ${builtins.typeOf rawConfigs}. Take
               the argument and ignore it (`_lib: { ... }`) if you do not need it.
             '';
