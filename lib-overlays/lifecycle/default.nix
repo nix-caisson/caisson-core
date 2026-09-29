@@ -1199,6 +1199,25 @@ let
           pkgOverlays = registeredPkgOverlays;
         };
 
+        # The constructors that make registry entries, as the core and
+        # bootstrap libs hold them. A registration closes over its
+        # author's composition, the lib whose `caisson-core.modules` is
+        # the author's registry, and for the registrations made at those
+        # stages that is the full lib, not the lib the registry function
+        # receives. So `mkModule` there, and every class-bound `mkModule`
+        # made from it (the integrations' and the class index that
+        # `mkModules` reads), closes over the full lib, as the helpers
+        # handed to `libOverlays` and `pkgOverlays` do.
+        registrationConstructors = {
+          mkModule = mkModuleForComposition {
+            inherit sources finalLib;
+          };
+          mkLibOverlay = mkLibOverlayHere;
+          mkPkgOverlay = mkPkgOverlayFor {
+            inherit sources finalLib;
+          };
+        };
+
         # A stage's manifest enters its lib through composition, as a
         # final overlay filling the slot.
         manifestOverlay = manifest: extra: {
@@ -1221,12 +1240,12 @@ let
         );
 
         coreComposition = composeRegistered { } (
-          builtins.map (name: forcedLibOverlays.${name}) coreNames ++ [ (manifestOverlay coreManifest { }) ]
+          builtins.map (name: forcedLibOverlays.${name}) coreNames ++ [ (manifestOverlay coreManifest registrationConstructors) ]
         );
         coreLib = coreComposition.lib;
 
         bootstrapComposition = composeRegistered { inherit published; } (
-          importedLibOverlays ++ [ (manifestOverlay bootstrapManifest { }) ]
+          importedLibOverlays ++ [ (manifestOverlay bootstrapManifest registrationConstructors) ]
         );
         bootstrapLib = bootstrapComposition.lib;
 

@@ -1264,6 +1264,27 @@ let
         fullManifest
       ];
 
+    # A module registered through the lib `modules` receives, the
+    # bootstrap lib, closes over the full lib, its author's
+    # composition: through `closure-lib` it reaches the registry it was
+    # registered into, siblings included.
+    lifecycleRegistrationsCloseOverTheFullLib =
+      let
+        composed = core.mkLib {
+          sources = { };
+          modules = lib: {
+            generic.probe = lib.caisson-core.mkModule "generic" ./fixtures/closure-probe;
+            generic.sibling = lib.caisson-core.classes.generic.mkModule ./fixtures/closure-probe;
+          };
+        };
+        closed = module: builtins.head module.imports;
+        probe = closed composed.caisson-core.libManifest.modules.generic.probe;
+        sibling = closed composed.caisson-core.libManifest.modules.generic.sibling;
+      in
+      probe.closureModules.generic ? sibling
+      && sibling.closureModules.generic ? probe
+      && !probe.closureManifest.childless;
+
     # The history of each stage begins with the history of the stage
     # before it: the prefix consistency the record promises, compared
     # on each event's identity.
