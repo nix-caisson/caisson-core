@@ -538,7 +538,7 @@ let
 
     # Two projects each exporting an overlay registered as `default`
     # both compose here: the compose key is the registry name in this
-    # tree, not the key the overlay carried from its own.
+    # tree, not the key the overlay carried from the tree that built it.
     lifecycleProjectOverlaysKeepTheirRegistryNames =
       let
         project =
@@ -712,8 +712,8 @@ let
             wrapper = mkLibOverlay wrapping;
           };
           libOverlayImports = lib: [
-            lib.caisson-core.libManifest.libOverlays.classes
-            lib.caisson-core.libManifest.libOverlays.wrapper
+            lib.caisson-core.nixpkgs-lib.overlays.classes
+            lib.caisson-core.nixpkgs-lib.overlays.wrapper
           ];
         };
       in
@@ -1141,8 +1141,8 @@ let
             );
           };
           libOverlayImports = lib: [
-            lib.caisson-core.libManifest.libOverlays.top
-            lib.caisson-core.libManifest.libOverlays.base
+            lib.caisson-core.nixpkgs-lib.overlays.top
+            lib.caisson-core.nixpkgs-lib.overlays.base
           ];
         };
         entries = composed.caisson-core.libManifest.entries;
@@ -1175,8 +1175,8 @@ let
             top = mkLibOverlay ./fixtures/history-overlays/top;
           };
           libOverlayImports = lib: [
-            lib.caisson-core.libManifest.libOverlays.base
-            lib.caisson-core.libManifest.libOverlays.top
+            lib.caisson-core.nixpkgs-lib.overlays.base
+            lib.caisson-core.nixpkgs-lib.overlays.top
           ];
           modules = composedLib: {
             nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { });
@@ -1207,6 +1207,36 @@ let
       }
       && (layer "caisson-core/lifecycle").origin.project == "caisson-core";
 
+    # `nixpkgs-lib.overlays` is the lib overlay registry at the lib it
+    # is read from: the registry on that lib's manifest, published and
+    # consumed entries included, at the core stage (where a selection
+    # reads it) and in the returned lib alike, and empty in a library
+    # no mkLib built.
+    lifecycleLibOverlaysViewIsTheRegistry =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = mkLibOverlay: {
+            base = mkLibOverlay ./fixtures/history-overlays/base;
+          };
+          libOverlayImports = lib: [
+            lib.caisson-core.nixpkgs-lib.overlays.base
+            {
+              imports = [ ];
+              overlay = _final: _prev: { coreSeen = lib; };
+            }
+          ];
+        };
+        names = set: builtins.attrNames set;
+      in
+      names composed.caisson-core.nixpkgs-lib.overlays == names composed.caisson-core.libManifest.libOverlays
+      && composed.caisson-core.nixpkgs-lib.overlays ? base
+      && composed.caisson-core.nixpkgs-lib.overlays ? nixpkgs-lib
+      && names composed.coreSeen.caisson-core.nixpkgs-lib.overlays
+      == names composed.caisson-core.libManifest.libOverlays
+      && composed.caisson-core.nixpkgs-lib.overlays.base.key == "base"
+      && core.nixpkgs-lib.overlays == { };
+
     # The lib is built in stages, each carrying a manifest.
     # The core lib, which `libOverlayImports` receives, holds the forced
     # entries and the registry; the bootstrap lib, which `modules` and
@@ -1223,7 +1253,7 @@ let
             base = mkLibOverlay ./fixtures/history-overlays/base;
           };
           libOverlayImports = lib: [
-            lib.caisson-core.libManifest.libOverlays.base
+            lib.caisson-core.nixpkgs-lib.overlays.base
             {
               imports = [ ];
               overlay = _final: _prev: { coreSeen = lib; };
@@ -1472,8 +1502,8 @@ let
             top = mkLibOverlay ./fixtures/history-overlays/top;
           };
           libOverlayImports = lib: [
-            lib.caisson-core.libManifest.libOverlays.base
-            lib.caisson-core.libManifest.libOverlays.top
+            lib.caisson-core.nixpkgs-lib.overlays.base
+            lib.caisson-core.nixpkgs-lib.overlays.top
             {
               imports = [ ];
               overlay = _final: _prev: { coreSeen = lib; };
@@ -1564,8 +1594,8 @@ let
             top = mkLibOverlay ./fixtures/history-overlays/top;
           };
           libOverlayImports = lib: [
-            lib.caisson-core.libManifest.libOverlays.base
-            lib.caisson-core.libManifest.libOverlays.top
+            lib.caisson-core.nixpkgs-lib.overlays.base
+            lib.caisson-core.nixpkgs-lib.overlays.top
           ];
         };
         manifest = composed.caisson-core.libManifest;
@@ -1711,7 +1741,7 @@ let
           };
           # Per-item choice over the combined dictionary: prefixed
           # project names beside local short names.
-          libOverlayImports = lib: [ lib.caisson-core.libManifest.libOverlays.local ];
+          libOverlayImports = lib: [ lib.caisson-core.nixpkgs-lib.overlays.local ];
         };
       in
       composed.fromLocal

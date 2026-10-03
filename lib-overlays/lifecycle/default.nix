@@ -14,12 +14,12 @@
 #     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or a pinned
 #     source named exactly so, through `resolve`; a miss is null, and
 #     the entry names the declaration only where it is composed.
-#   - The `caisson-core` namespace is contributed by caisson-core's own
+#   - The `caisson-core` namespace is contributed by caisson-core's
 #     entries and nothing else.  The manifest (the capture of what
 #     mkLib consumed) enters through composition as a synthetic final
 #     overlay, the same channel as everything else.
 #
-# This overlay takes the bootstrap closure of caisson-core's own
+# This overlay takes the bootstrap closure of caisson-core's
 # entries: the pinned sources this composition closes over, the entries it
 # publishes (`nixpkgs-lib`, in a composition mkLib builds), `compose`
 # and `coreEntries`, the function that makes these entries for a
@@ -130,7 +130,7 @@ let
   # its fixpoint with a bootstrap makeExtensible that exposes `extend`
   # only, no `__unfix__`, so the library cannot be re-tied over the
   # composed fixpoint here; a polyfill composed later overrides a
-  # name for readers of the composed lib, not for upstream's own
+  # name for readers of the composed lib, not for upstream's
   # internal references.) `src` is a tree holding nixpkgs' `lib`
   # directory, either a nixpkgs checkout or the nixpkgs.lib mirror, or
   # that directory itself; null means no source was declared, and the
@@ -678,8 +678,8 @@ let
       # `mkLibOverlay: { <name> = overlay; }`, usually mkLibOverlays ./lib-overlays.
       libOverlays ? null,
       # `lib: [ <entry> ]`: which registered overlays apply to this
-      # composition, given the core lib, whose manifest carries the
-      # registry (`lib.caisson-core.libManifest.libOverlays.<name>`).
+      # composition, given the core lib, which carries the registry as
+      # `lib.caisson-core.nixpkgs-lib.overlays.<name>`.
       libOverlayImports ? null,
       # `mkPkgOverlay: { <name> = entry; }`, usually mkPkgOverlays ./pkg-overlays:
       # the package overlays this tree registers, keyed entries whose
@@ -775,7 +775,7 @@ let
         rawPkgOverlays = given "pkgOverlays" (mkPkgOverlay: { });
         rawPkgSets = given "pkgSets" (_lib: { });
         rawLibOverlayImports = given "libOverlayImports" (
-          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libManifest.libOverlays publishedNames)
+          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays publishedNames)
         );
         rawEcosystems = given "defaultEcosystemSrc" { };
         rawProjects = given "projects" { };
@@ -935,7 +935,7 @@ let
             '';
 
         # The source supplying the `nixpkgs-lib` part of the stack: the
-        # part declared on its own, else the tree's nixpkgs (one pin
+        # part declared separately, else the tree's nixpkgs (one pin
         # supplies every part), else a pinned source named exactly as
         # either; null when nothing declares it.
         nixpkgsLibSource =
@@ -1040,7 +1040,7 @@ let
             local (rekeyPkgOverlay (key: key) name entry)
           ) localPkgOverlays;
 
-        # The same construction as the composition's own
+        # The same construction as the composition's
         # `caisson-core.mkLibOverlay`, bound before the fixpoint
         # exists: the registered overlay set is what the fixpoint is
         # built from, so it cannot be read back out of it.
@@ -1088,7 +1088,8 @@ let
         );
 
         # caisson-core's forced entries as the core stage composes them:
-        # its own, whatever the registry holds under their keys. The
+        # the entries it ships, whatever the registry holds under their
+        # keys. The
         # registry is grafted onto the core lib and so cannot change it;
         # a same-key registration replaces a forced entry from the
         # bootstrap stage on.
@@ -1117,7 +1118,7 @@ let
             throw ''
               mkLib expects `libOverlayImports` to be a function taking the core
               lib and returning the entries to compose
-              (`lib: [ lib.caisson-core.libManifest.libOverlays.<name> ]`), but
+              (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
               got a ${builtins.typeOf rawLibOverlayImports}.
             '';
         importedLibOverlays =
@@ -1715,6 +1716,18 @@ in
       libManifest = (prev.caisson-core or { }).libManifest or null;
       pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
       evalManifest = (prev.caisson-core or { }).evalManifest or null;
+      # The lib overlay registry visible at this lib, by registry name:
+      # a view of the manifest's `libOverlays`, which a selection
+      # refers into (`libOverlayImports = lib: [
+      # lib.caisson-core.nixpkgs-lib.overlays.<name> ];`). Empty in a
+      # library no mkLib built.
+      nixpkgs-lib = ((prev.caisson-core or { }).nixpkgs-lib or { }) // {
+        overlays =
+          let
+            manifest = final.caisson-core.libManifest;
+          in
+          if manifest == null then { } else manifest.libOverlays or { };
+      };
     };
   };
 }
