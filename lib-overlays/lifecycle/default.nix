@@ -634,7 +634,9 @@ let
       configs ? null,
       # `mkLibOverlay: { <name> = overlay; }`, usually mkLibOverlays ./lib-overlays.
       libOverlays ? null,
-      # Which registered overlays apply to this composition.
+      # `lib: [ <entry> ]`: which registered overlays apply to this
+      # composition, given the core lib, whose manifest carries the
+      # registry (`lib.caisson-core.libManifest.libOverlays.<name>`).
       libOverlayImports ? null,
       # `mkPkgOverlay: { <name> = entry; }`, usually mkPkgOverlays ./pkg-overlays:
       # the package overlays this tree registers, keyed entries whose
@@ -718,11 +720,13 @@ let
           in
           if value == null then default else value;
 
-        rawModules = given "modules" (composedLib: { });
-        rawConfigs = given "configs" (composedLib: { });
+        rawModules = given "modules" (_lib: { });
+        rawConfigs = given "configs" (_lib: { });
         rawLibOverlays = given "libOverlays" (mkLibOverlay: { });
         rawPkgOverlays = given "pkgOverlays" (mkPkgOverlay: { });
-        libOverlayImports = given "libOverlayImports" (overlays: builtins.attrValues overlays);
+        rawLibOverlayImports = given "libOverlayImports" (
+          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libManifest.libOverlays publishedNames)
+        );
         rawEcosystems = given "defaultEcosystemSrc" { };
         rawProjects = given "projects" { };
         rawSystems = resolvedArgs.systems or null;
@@ -913,15 +917,16 @@ let
           nixpkgs-lib = registeredLibOverlays.nixpkgs-lib;
         };
 
+        # `modules` and `configs` are functions of the bootstrap lib: the
+        # selected entries are in it, the module registrations are not.
         modules =
           if builtins.isFunction rawModules then
-            rawModules finalLib
+            rawModules bootstrapLib
           else
             throw ''
-              mkLib expects `modules` to be a function taking the composed
-              library (`composedLib: { ... }`), but got a ${builtins.typeOf rawModules}. Take
-              the argument and ignore it (`_composedLib: { ... }`) if you do not need
-              it.
+              mkLib expects `modules` to be a function taking the bootstrap
+              library (`lib: { ... }`), but got a ${builtins.typeOf rawModules}. Take
+              the argument and ignore it (`_lib: { ... }`) if you do not need it.
             '';
         # The configurations of this tree, keyed by module class then
         # name (`configs/<class>/<name>` on disk): the modules a top
@@ -930,10 +935,10 @@ let
         # only; consumed projects contribute none.
         configs =
           if builtins.isFunction rawConfigs then
-            rawConfigs finalLib
+            rawConfigs bootstrapLib
           else
             throw ''
-              mkLib expects `configs` to be a function taking the composed
+              mkLib expects `configs` to be a function taking the bootstrap
               library (`lib: { ... }`), but got a ${builtins.typeOf rawConfigs}. Take
               the argument and ignore it (`_lib: { ... }`) if you do not need it.
             '';
@@ -1022,28 +1027,60 @@ let
         # composition did not register either. An export selector keeps
         # the local entries with a filter on `project == null`.
         registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
-          builtins.mapAttrs (_: overlay: overlay // { project = "caisson-core"; }) (
-            coreOverlays
-            // {
-              nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource;
-            }
-          )
+          forcedLibOverlays
+          // {
+            nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource // {
+              project = "caisson-core";
+            };
+          }
           // projectLibOverlays
           // builtins.mapAttrs (_: overlay: overlay // { project = null; }) libOverlays
         );
 
+        # caisson-core's forced entries as the core stage composes them:
+        # its own, whatever the registry holds under their keys. The
+        # registry is grafted onto the core lib and so cannot change it;
+        # a same-key registration replaces a forced entry from the
+        # bootstrap stage on.
+        forcedLibOverlays = builtins.mapAttrs (
+          name: overlay:
+          overlay
+          // {
+            key = name;
+            project = "caisson-core";
+          }
+        ) coreOverlays;
+
         # The selection: caisson-core's entries are always composed and
-        # first; the rest is what `libOverlayImports` selects from the
-        # registry's project and local entries. The published entries
-        # are not selectable: `nixpkgs-lib` is composed wherever an
-        # overlay imports it, and nowhere otherwise. `compose`
-        # deduplicates by key, so an entry imported twice composes
-        # once.
+        # first; the rest is what `libOverlayImports` selects, given the
+        # core lib. By default it selects the registry's project and
+        # local entries. The published entries are not in the default:
+        # `nixpkgs-lib` is composed wherever an overlay imports it, and
+        # nowhere otherwise. `compose` deduplicates by key, so an entry
+        # imported twice, or a forced entry named again, composes once.
         coreNames = builtins.attrNames coreOverlays;
         publishedNames = coreNames ++ [ "nixpkgs-lib" ];
+        libOverlayImports =
+          if builtins.isFunction rawLibOverlayImports then
+            rawLibOverlayImports coreLib
+          else
+            throw ''
+              mkLib expects `libOverlayImports` to be a function taking the core
+              lib and returning the entries to compose
+              (`lib: [ lib.caisson-core.libManifest.libOverlays.<name> ]`), but
+              got a ${builtins.typeOf rawLibOverlayImports}.
+            '';
         importedLibOverlays =
           builtins.map (name: registeredLibOverlays.${name}) coreNames
-          ++ libOverlayImports (builtins.removeAttrs registeredLibOverlays publishedNames);
+          ++ (
+            if builtins.isList libOverlayImports then
+              libOverlayImports
+            else
+              throw ''
+                mkLib expects `libOverlayImports` to return a list of registered
+                entries, but it returned a ${builtins.typeOf libOverlayImports}.
+              ''
+          );
 
         # Consumed projects' modules enter the registry like overlay
         # contributions: available to every selection, beaten by a
@@ -1088,52 +1125,109 @@ let
             }) (builtins.attrNames modules)
           );
 
-        # The lib manifest: the capture of what mkLib consumed, filled
-        # into the `libManifest` slot through composition like
-        # everything else.  Its dictionaries are the registered ones
-        # (project entries under `<project>/<name>`, locals winning a
-        # name collision), so export selections drawn from the
-        # manifest see project-borne entries exactly like
+        # The lib is built in three stages, each a new fixpoint over the
+        # seed, and each carrying its own manifest in the `libManifest`
+        # slot, so `lib.caisson-core.libManifest` is always the record of
+        # the lib being read at the stage that lib is at.
+        #
+        #   - The core lib: caisson-core's forced entries, with the lib
+        #     overlay registry grafted onto its manifest. It is the lib
+        #     `libOverlayImports` receives.
+        #   - The bootstrap lib: the forced entries and the selection. It
+        #     is the lib the `modules` and `configs` functions receive, so
+        #     its manifest lacks what they register, and `pkgOverlays`
+        #     with them.
+        #   - The full lib: the same entries with those registrations
+        #     grafted on, and the modules they register composed into the
+        #     module registry view. It is the lib mkLib returns.
+        #
+        # The core and bootstrap manifests are childless: they are
+        # records of a lib before everything beneath it exists. The full
+        # lib is the full lib of a root declaration, so it is not
+        # childless and its chain is empty: no parent, no ancestors,
+        # nothing consumed, and no children until package configs are
+        # built under it. Every stage shares the declared facts. `sources`
+        # are the pinned sources with each pin recorded against the root,
+        # `root` is the tree's identity, and `name` is the declared
+        # project name, absent when none is declared. The registries are
+        # the registered ones (project entries under `<project>/<name>`,
+        # locals winning a name collision), so export selections drawn
+        # from the manifest see project-borne entries exactly like
         # hand-registered ones; `projects` keeps the raw per-project
-        # capture.  `sources` are the pinned sources with each pin
-        # recorded against the root, and `root` the tree's identity.
-        # `name` is the declared project name, absent when none is
-        # declared. The lib mkLib returns is the full lib of a root
-        # declaration, so it is not childless and its chain is empty:
-        # no parent, no ancestors, nothing consumed, and no children
-        # until package configs are built under it.  Checks belong to
-        # the export side (integrations), not here.
-        manifestOverlay = {
+        # capture. Checks belong to the export side (integrations), not
+        # here.
+        stageManifest = {
+          _type = "caisson-manifest";
+          type = "lib";
+          inherit
+            defaultEcosystemSrc
+            projects
+            root
+            systems
+            ;
+          sources = recordedSources;
+          libOverlays = registeredLibOverlays;
+          inputs = [ ];
+          parent = null;
+          ancestors = [ ];
+          nearest = { };
+          children = { };
+        }
+        // (if name == null then { } else { inherit name; });
+
+        coreManifest = stageManifest // {
+          childless = true;
+          entries = builtins.map (key: {
+            inherit key;
+            opaque = false;
+          }) coreNames;
+          history = coreHistory;
+        };
+
+        bootstrapManifest = stageManifest // {
+          childless = true;
+          inherit entries;
+          history = bootstrapHistory;
+        };
+
+        fullManifest = stageManifest // {
+          childless = false;
+          inherit configs entries history;
+          modules = registeredModules;
+          moduleProjects = registeredModuleProjects;
+          pkgOverlays = registeredPkgOverlays;
+        };
+
+        # The constructors that make registry entries, as the core and
+        # bootstrap libs hold them. A registration closes over its
+        # author's composition, the lib whose `caisson-core.modules` is
+        # the author's registry, and for the registrations made at those
+        # stages that is the full lib, not the lib the registry function
+        # receives. So `mkModule` there, and every class-bound `mkModule`
+        # made from it (the integrations' and the class index that
+        # `mkModules` reads), closes over the full lib, as the helpers
+        # handed to `libOverlays` and `pkgOverlays` do.
+        registrationConstructors = {
+          mkModule = mkModuleForComposition {
+            inherit sources finalLib;
+          };
+          mkLibOverlay = mkLibOverlayHere;
+          mkPkgOverlay = mkPkgOverlayFor {
+            inherit sources finalLib;
+          };
+        };
+
+        # A stage's manifest enters its lib through composition, as a
+        # final overlay filling the slot.
+        manifestOverlay = manifest: extra: {
           imports = [ ];
           overlay = _final: prev: {
-            caisson-core = (prev.caisson-core or { }) // {
-              inherit configs;
-              libManifest = {
-                _type = "caisson-manifest";
-                type = "lib";
-                inherit
-                  configs
-                  defaultEcosystemSrc
-                  entries
-                  history
-                  projects
-                  root
-                  systems
-                  ;
-                sources = recordedSources;
-                libOverlays = registeredLibOverlays;
-                modules = registeredModules;
-                moduleProjects = registeredModuleProjects;
-                pkgOverlays = registeredPkgOverlays;
-                childless = false;
-                inputs = [ ];
-                parent = null;
-                ancestors = [ ];
-                nearest = { };
-                children = { };
-              }
-              // (if name == null then { } else { inherit name; });
-            };
+            caisson-core =
+              (prev.caisson-core or { })
+              // extra
+              // {
+                libManifest = manifest;
+              };
           };
         };
 
@@ -1143,6 +1237,26 @@ let
             value = registeredLibOverlays.${name};
           }) publishedNames
         );
+
+        coreComposition = composeRegistered { } (
+          builtins.map (name: forcedLibOverlays.${name}) coreNames ++ [ (manifestOverlay coreManifest registrationConstructors) ]
+        );
+        coreLib = coreComposition.lib;
+
+        bootstrapComposition = composeRegistered { inherit published; } (
+          importedLibOverlays ++ [ (manifestOverlay bootstrapManifest registrationConstructors) ]
+        );
+        bootstrapLib = bootstrapComposition.lib;
+
+        composition = composeRegistered { inherit published; } (
+          importedLibOverlays
+          ++ [
+            projectModulesOverlay
+            localModulesOverlay
+            (manifestOverlay fullManifest { inherit configs; })
+          ]
+        );
+        finalLib = composition.lib;
 
         # The manifest's `entries`: the selection's keys in composition
         # order, caisson-core's forced entries first. A key that names
@@ -1164,33 +1278,29 @@ let
             opaque = true;
           }) selectionMeta.tailLength;
 
-        composition = composeRegistered { inherit published; } (
-          importedLibOverlays
-          ++ [
-            projectModulesOverlay
-            localModulesOverlay
-            manifestOverlay
-          ]
-        );
-        finalLib = composition.lib;
-
         # The manifest's `history`: the events recorded on the way to
-        # this lib, in stage order. The lib overlay registry is grafted
-        # at the core stage, so its registrations come first; then the
-        # selected entries compose, one `layer` event each in
-        # composition order; then the `modules`, `configs` and
-        # `pkgOverlays` registrations are grafted at the bootstrap
-        # stage. Each event names its manifest (the empty name path:
-        # this is the root lib), its type and operation, its key, its
-        # index within its operation and its origin, the project that
-        # registered it (this project's name for a local entry) and
-        # the file it was built from where one is known. A layer event
-        # also carries the two sides of its overlay call,
-        # `final: prev: result`: `result`, the attrset its overlay
-        # returned (the names the layer defines, where it binds them
-        # and the values they had after it), and `prev`, the
-        # accumulation it received, which tells a name it defines from
-        # one it carries over; `definers` reads both lazily.
+        # the lib, in stage order, the history of each stage beginning
+        # with the history of the stage before it. The core stage
+        # records its forced entries, one `layer` event each, then the
+        # lib overlay registrations grafted onto it. The bootstrap stage
+        # adds a `layer` event for each entry it composes that the core
+        # stage did not: the selection, and a registration replacing a
+        # forced entry under its key, which comes after the entry it
+        # replaces, so `definers` names it the winner. The full stage
+        # adds the `modules`, `configs` and `pkgOverlays` registrations.
+        #
+        # Each event names its manifest (the empty name path: this is
+        # the root lib), its type and operation, its key, its index
+        # within its operation and its origin, the project that
+        # registered it (this project's name for a local entry) and the
+        # file it was built from where one is known. A layer event also
+        # carries the two sides of its overlay call,
+        # `final: prev: result`, as the stage that recorded it composed
+        # them: `result`, the attrset its overlay returned (the names
+        # the layer defines, where it binds them and the values they
+        # had after it), and `prev`, the accumulation it received,
+        # which tells a name it defines from one it carries over;
+        # `definers` reads both lazily.
         originOf = entry: {
           project = if (entry.project or null) == null then name else entry.project;
           file = entry.origin or null;
@@ -1199,7 +1309,7 @@ let
           key = "libOverlays.${n}";
           origin = originOf registeredLibOverlays.${n};
         }) (builtins.attrNames registeredLibOverlays);
-        bootstrapRegistrations =
+        fullRegistrations =
           builtins.concatMap (
             class:
             builtins.map (n: {
@@ -1228,53 +1338,84 @@ let
             key = "pkgOverlays.${n}";
             origin = originOf registeredPkgOverlays.${n};
           }) (builtins.attrNames registeredPkgOverlays);
-        registryEvent = index: registration: {
-          manifest = [ ];
-          type = "lib";
-          operation = "registry";
-          inherit index;
-          inherit (registration) key origin;
-        };
-        selectionLength = builtins.length selectionMeta.order + selectionMeta.tailLength;
-        keyedLength = builtins.length selectionMeta.order;
-        layerEvents = builtins.genList (
-          index:
+        registryEvents =
+          offset: registrations:
+          builtins.genList (
+            i:
+            let
+              registration = builtins.elemAt registrations i;
+            in
+            {
+              manifest = [ ];
+              type = "lib";
+              operation = "registry";
+              index = offset + i;
+              inherit (registration) key origin;
+            }
+          ) (builtins.length registrations);
+        layerEvents =
+          offset: layers:
+          builtins.genList (
+            i:
+            let
+              recorded = builtins.elemAt layers i;
+            in
+            {
+              manifest = [ ];
+              type = "lib";
+              operation = "layer";
+              index = offset + i;
+              inherit (recorded) key;
+              origin =
+                if recorded.registered != null then
+                  originOf recorded.registered
+                else
+                  {
+                    project = null;
+                    file = null;
+                  };
+              inherit (recorded.layer) result prev;
+            }
+          ) (builtins.length layers);
+
+        # The forced entries' layers, as the core stage composed them.
+        coreLayers = builtins.genList (
+          i:
           let
-            layer = builtins.elemAt composition.layers index;
-            key =
-              if (layer.entry.key or null) != null then
-                layer.entry.key
-              else
-                "keyless/${toString (index - keyedLength)}";
-            registered = registeredLibOverlays.${key} or null;
+            layer = builtins.elemAt coreComposition.layers i;
           in
           {
-            manifest = [ ];
-            type = "lib";
-            operation = "layer";
-            inherit index key;
-            origin =
-              if registered != null then
-                originOf registered
-              else
-                {
-                  project = null;
-                  file = null;
-                };
-            inherit (layer) result prev;
+            inherit layer;
+            inherit (layer.entry) key;
+            registered = forcedLibOverlays.${layer.entry.key};
           }
-        ) selectionLength;
-        history =
+        ) (builtins.length coreNames);
+
+        # The bootstrap stage's layers, less the forced entries it
+        # composes unchanged, which the core stage already recorded.
+        keyedLength = builtins.length selectionMeta.order;
+        selectionLength = keyedLength + selectionMeta.tailLength;
+        unchangedForced =
+          key: forcedLibOverlays ? ${key} && (registeredLibOverlays.${key}.project or null) == "caisson-core";
+        bootstrapLayers = builtins.filter (recorded: !(unchangedForced recorded.key)) (
           builtins.genList (
-            i: registryEvent i (builtins.elemAt libOverlayRegistrations i)
-          ) (builtins.length libOverlayRegistrations)
-          ++ layerEvents
-          ++ builtins.genList (
             i:
-            registryEvent (builtins.length libOverlayRegistrations + i) (
-              builtins.elemAt bootstrapRegistrations i
-            )
-          ) (builtins.length bootstrapRegistrations);
+            let
+              layer = builtins.elemAt bootstrapComposition.layers i;
+              key =
+                if (layer.entry.key or null) != null then layer.entry.key else "keyless/${toString (i - keyedLength)}";
+            in
+            {
+              inherit layer key;
+              registered = registeredLibOverlays.${key} or null;
+            }
+          ) selectionLength
+        );
+
+        coreHistory = layerEvents 0 coreLayers ++ registryEvents 0 libOverlayRegistrations;
+        bootstrapHistory = coreHistory ++ layerEvents (builtins.length coreLayers) bootstrapLayers;
+        history =
+          bootstrapHistory ++ registryEvents (builtins.length libOverlayRegistrations) fullRegistrations;
 
       in
       # Surface argument-shape errors as soon as the result is used,
@@ -1287,6 +1428,7 @@ let
         (builtins.isFunction rawModules || modules)
         (builtins.isFunction rawConfigs || configs)
         (builtins.isFunction rawLibOverlays || libOverlays)
+        (builtins.isFunction rawLibOverlayImports || libOverlayImports)
         (builtins.isFunction rawPkgOverlays || localPkgOverlays)
         (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
         (builtins.isAttrs rawProjects || projects)

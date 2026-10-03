@@ -108,11 +108,16 @@ core.mkLib {
                           # the tree's default source per ecosystem, by
                           # exact name; `nixpkgs` supplies the nixpkgs-lib
                           # part unless `nixpkgs-lib` names its own source
-  modules = composedLib: { };         # class-keyed local registrations
-  configs = composedLib: { };         # class-keyed configurations
-                                      # (configs/<class>/<name>)
+  modules = lib: { };                 # class-keyed local registrations,
+                                      # given the bootstrap lib
+  configs = lib: { };                 # class-keyed configurations
+                                      # (configs/<class>/<name>), given
+                                      # the bootstrap lib
   libOverlays = mkLibOverlay: { };    # named overlay registrations
-  libOverlayImports = builtins.attrValues;  # selection for this library
+  libOverlayImports = lib: [ lib.caisson-core.libManifest.libOverlays.my-overlay ];
+                                      # selection for this library, given
+                                      # the core lib; defaults to every
+                                      # project and local registration
   pkgOverlays = mkPkgOverlay: { };    # named package overlay registrations
   projects = { };                     # consumed upstream contributions,
                                       # by project name
@@ -128,6 +133,26 @@ The signature is the pattern of `mkLib`, with no `...`: a missing or
 unexpected argument is Nix's own error at the call site, naming
 `mkLib` and pointing at the pattern, whose comments say what each
 argument is.
+
+The library is built in three stages, each a new fixpoint over the
+empty seed with its own manifest in `caisson-core.libManifest`. The
+core lib holds caisson-core's own entries and nothing else, with the
+lib overlay registry grafted onto its manifest; it is the lib
+`libOverlayImports` receives, so a selection refers to entries as
+`lib.caisson-core.libManifest.libOverlays.<name>`. The bootstrap lib
+adds the selection, the `nixpkgs-lib` entry and every integration
+among it; it is the lib `modules` and `configs` receive, and its
+manifest lacks `modules`, `moduleProjects`, `configs` and
+`pkgOverlays`. The full lib is the same entries with those
+registrations grafted on, and it is the lib `mkLib` returns. The core
+and bootstrap manifests have `childless = true`. A registration made
+at either earlier stage still closes over the full lib: the
+constructors those libs hold (`mkModule` and every class-bound
+`mkModule` made from it, `mkLibOverlay`, `mkPkgOverlay`) give
+`closure-lib` the full lib, whose `caisson-core.modules` is the
+registry the entry joins. A same-key registration replaces one of
+caisson-core's entries from the bootstrap stage on; the core lib keeps
+the original.
 
 A tree laid out as `modules/<class>/<name>/default.nix`,
 `configs/<class>/<name>/default.nix`,
@@ -261,17 +286,22 @@ registered), and a keyless entry gets a synthesized `keyless/<n>`
 key. The lib `mkLib` returns is the full lib of a root declaration,
 so `childless` is false, `parent` is null, and `ancestors`, `inputs`,
 `nearest` and `children` are empty. `history` lists the events
-recorded on the way to the lib, in stage order: the lib overlay
-registrations, one `layer` event per selected entry in composition
-order, then the `modules`, `configs` and `pkgOverlays` registrations.
+recorded on the way to the lib, in stage order, and the history of
+each stage begins with the history of the stage before it. The core
+stage records one `layer` event per caisson-core entry, then the lib
+overlay registrations. The bootstrap stage adds one `layer` event per
+entry it composes that the core stage did not, in composition order:
+the selection, and a registration replacing a caisson-core entry,
+which so comes after the entry it replaces. The full stage adds the
+`modules`, `configs` and `pkgOverlays` registrations.
 Each event has `manifest` (the name path, empty for the root lib),
 `type`, `operation` (`registry` or `layer`), `key`, `index` (its
 position within its operation) and `origin` (`project`, and `file`
 where the entry was built from one; a lib overlay built from a file
 records it as `origin`). A layer event also carries, lazily, the two
-sides of its overlay call `final: prev: result`: `result`, the
-attrset its overlay returned, and `prev`, the accumulation it
-received.
+sides of its overlay call `final: prev: result`, as the stage that
+recorded it composed them: `result`, the attrset its overlay
+returned, and `prev`, the accumulation it received.
 `definers manifest [ "my-project" "helper" ]` reads them: the layers
 that define that path in order, the winner last, each with its value
 after the layer and its binding position when that lies in the
