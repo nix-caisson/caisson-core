@@ -448,30 +448,30 @@ let
   # Find the manifest in whatever a file returns: a manifest itself,
   # an attrset carrying `caisson.manifest`, an evaluated configuration
   # carrying `config.caisson.manifest`, or a lib (or a package set,
-  # through `pkgs.lib`) carrying the phase slots, where the last
-  # filled slot is the manifest.  Null when the value carries none.
+  # through `pkgs.lib`) carrying the phase manifests, where the last
+  # one filled in is the manifest.  Null when the value carries none.
   manifestOf =
     value:
     let
       isManifest = v: builtins.isAttrs v && (v._type or null) == "caisson-manifest";
-      # The last filled of a composed lib's phase slots, or null.
-      lastSlot =
+      # The last filled in of a composed lib's phase manifests, or null.
+      lastFilled =
         composed:
         let
-          slots = composed.caisson-core;
+          phases = composed.caisson-core;
         in
-        if slots.evalManifest or null != null then
-          slots.evalManifest
-        else if slots.pkgsManifest or null != null then
-          slots.pkgsManifest
+        if phases.evalManifest or null != null then
+          phases.evalManifest
+        else if phases.pkgsManifest or null != null then
+          phases.pkgsManifest
         else
-          slots.libManifest or null;
+          phases.libManifest or null;
       candidates = [
         value
         (value.caisson.manifest or null)
         (value.config.caisson.manifest or null)
-        (if builtins.isAttrs value && value ? caisson-core then lastSlot value else null)
-        (if builtins.isAttrs value && value ? lib.caisson-core then lastSlot value.lib else null)
+        (if builtins.isAttrs value && value ? caisson-core then lastFilled value else null)
+        (if builtins.isAttrs value && value ? lib.caisson-core then lastFilled value.lib else null)
       ];
       found = builtins.filter isManifest candidates;
     in
@@ -1133,8 +1133,8 @@ let
           );
 
         # The lib is built in three stages, each a new fixpoint over the
-        # seed, and each carrying its own manifest in the `libManifest`
-        # slot, so `lib.caisson-core.libManifest` is always the record of
+        # seed, and each carrying its own manifest as `libManifest`, so
+        # `lib.caisson-core.libManifest` is always the record of
         # the lib being read at the stage that lib is at.
         #
         #   - The core lib: caisson-core's forced entries, with the lib
@@ -1258,7 +1258,7 @@ let
         };
 
         # A stage's manifest enters its lib through composition, as a
-        # final overlay filling the slot.
+        # final overlay setting `libManifest`.
         manifestOverlay = manifest: extra: {
           imports = [ ];
           overlay = _final: prev: {
@@ -1278,51 +1278,55 @@ let
           }) publishedNames
         );
 
-        # The phase slots a later phase fills on a lib it hands out:
-        # `pkgsManifest` on the lib inside a package set, `evalManifest`
-        # on the lib a module evaluation is built with. `libManifest` is
-        # the record of the stage itself and is not among them.
-        phaseSlots = [
+        # The phase manifests a later phase fills in on a lib it hands
+        # out: `pkgsManifest` on the lib inside a package set,
+        # `evalManifest` on the lib a module evaluation is built with.
+        # `libManifest` is the record of the stage itself and is not
+        # among them.
+        phaseManifests = [
           "pkgsManifest"
           "evalManifest"
         ];
-        checkedSlots =
-          slots:
-          if !builtins.isAttrs slots then
+        checkedManifests =
+          given:
+          if !builtins.isAttrs given then
             throw ''
-              caisson-core.withSlots expects an attribute set of phase slots
-              (`{ pkgsManifest = <manifest>; }`), but got a ${builtins.typeOf slots}.
+              caisson-core.withManifests expects an attribute set of phase
+              manifests (`{ pkgsManifest = <manifest>; }`), but got a ${builtins.typeOf given}.
             ''
           else
             let
-              # Refused when the slots are merged, not when a slot is
-              # read: an unknown name such as `libManifest` is shadowed
-              # by the stage's own binding and would never be read.
-              unknown = builtins.filter (slot: !(builtins.elem slot phaseSlots)) (builtins.attrNames slots);
+              # Refused when the attribute set is merged, not when a
+              # manifest is read: an unknown name such as `libManifest`
+              # is shadowed by the stage's own binding and would never
+              # be read.
+              unknown = builtins.filter (attr: !(builtins.elem attr phaseManifests)) (
+                builtins.attrNames given
+              );
             in
             if unknown != [ ] then
               throw ''
-                caisson-core.withSlots fills the phase slots ${builtins.concatStringsSep " and " phaseSlots},
+                caisson-core.withManifests fills in ${builtins.concatStringsSep " and " phaseManifests},
                 but was given `${builtins.head unknown}`.
               ''
             else
               builtins.mapAttrs (
-                slot: value:
+                attr: value:
                 if value == null || (builtins.isAttrs value && (value._type or null) == "caisson-manifest") then
                   value
                 else
                   throw ''
-                    caisson-core.withSlots expects `${slot}` to be a manifest (an
-                    attribute set with `_type = "caisson-manifest"`) or null.
+                    caisson-core.withManifests expects `${attr}` to be a manifest
+                    (an attribute set with `_type = "caisson-manifest"`) or null.
                   ''
-              ) slots;
+              ) given;
 
         # A stage of the lib, composed from its overlays with its
-        # manifest and the given phase slots filled. The stage carries
-        # `caisson-core.withSlots`, which rebuilds it from the same
-        # declaration with more slots filled: a new fixpoint, so
-        # everything that reads a slot through the fixpoint sees the
-        # record, and not an attribute merge over a built lib.
+        # manifest and the given phase manifests filled in. The stage
+        # carries `caisson-core.withManifests`, which rebuilds it from
+        # the same declaration with more phase manifests filled in: a
+        # new fixpoint, so everything that reads one through the
+        # fixpoint sees it, and not an attribute merge over a built lib.
         stage =
           {
             composeArgs,
@@ -1330,15 +1334,15 @@ let
             manifest,
             extra,
           }:
-          slots:
+          filled:
           composeRegistered composeArgs (
             overlays
             ++ [
               (manifestOverlay manifest (
                 extra
-                // slots
+                // filled
                 // {
-                  withSlots =
+                  withManifests =
                     more:
                     (stage {
                       inherit
@@ -1347,7 +1351,7 @@ let
                         manifest
                         extra
                         ;
-                    } (slots // checkedSlots more)).lib;
+                    } (filled // checkedManifests more)).lib;
                 }
               ))
             ]
@@ -1621,11 +1625,11 @@ in
       // ((prev.caisson-core or { }).classes or { });
       # The configurations registry, filled by mkLib.
       configs = (prev.caisson-core or { }).configs or { };
-      # The manifest slots, one per evaluation phase: the lib (filled
-      # by mkLib), the package set (filled on the lib inside a package
-      # set) and the module evaluation (filled on the lib an
+      # The phase manifests, one per evaluation phase: the lib (filled
+      # in by mkLib), the package set (filled in on the lib inside a
+      # package set) and the module evaluation (filled in on the lib an
       # evaluation is built with). All three are present on every
-      # composed library and null until filled.
+      # composed library and null until filled in.
       libManifest = (prev.caisson-core or { }).libManifest or null;
       pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
       evalManifest = (prev.caisson-core or { }).evalManifest or null;

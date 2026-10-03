@@ -54,7 +54,7 @@ in
   many entries import it. The *first* occurrence of a key fixes its
   position; the *last* occurrence supplies its value, so mentioning a
   key again replaces that entry wholesale. A replacement inherits the
-  replaced entry's slot: its own imports are pulled into the
+  replaced entry's position: its own imports are pulled into the
   composition, but they land later, guaranteeing reachability rather
   than precedence.
 - **Cycles terminate.** The walk skips a key that is already on its
@@ -200,7 +200,7 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized),
 `mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
-registry, the class index `classes`, the three manifest slots
+registry, the class index `classes`, the three phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf` and
 `definers`,
 plus `compose`,
@@ -314,23 +314,23 @@ returned, and `prev`, the accumulation it received.
 that define that path in order, the winner last, each with its value
 after the layer and its binding position when that lies in the
 layer's file. A layer returning `prev.x // { ... }` carries the names
-under `x` without defining them. There is a slot per evaluation phase: `libManifest` is
-filled here, and `pkgsManifest` and `evalManifest` are present and
+under `x` without defining them. A lib carries a manifest per evaluation phase: `libManifest` is
+filled in here, and `pkgsManifest` and `evalManifest` are present and
 null, for the layers that build package sets and module evaluations
-to fill on the libraries they hand out. Every stage `mkLib` builds
-carries `caisson-core.withSlots { pkgsManifest = manifest; }`, which
-rebuilds that stage from its declaration with the given phase slots
-filled: the same entries and `libManifest`, composed as a new
-fixpoint, so everything that reads a slot through the fixpoint sees
-the record. It is how the nixpkgs integration hands out `pkgs.lib`,
-the bootstrap lib with `pkgsManifest` filled. Only `pkgsManifest` and
+to fill in on the libraries they hand out. Every stage `mkLib` builds
+carries `caisson-core.withManifests { pkgsManifest = manifest; }`,
+which rebuilds that stage from its declaration with the given phase
+manifests filled in: the same entries and `libManifest`, composed as a
+new fixpoint, so everything that reads one through the fixpoint sees
+it. It is how the nixpkgs integration hands out `pkgs.lib`, the
+bootstrap lib with `pkgsManifest` filled in. Only `pkgsManifest` and
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
-lib carries `withSlots` too, keeping the slots already filled. Every manifest carries
+lib carries `withManifests` too, keeping what is already filled in. Every manifest carries
 `_type = "caisson-manifest"`, and `manifestOf` finds one in whatever
 a file returns: a manifest, an attrset carrying `caisson.manifest`,
 an evaluated configuration carrying `config.caisson.manifest`, or a
-library (or a package set, through `pkgs.lib`) carrying the slots,
-where the last filled slot is the manifest. It returns null when the
+library (or a package set, through `pkgs.lib`) carrying the phase
+manifests, where the last one filled in is the manifest. It returns null when the
 value carries none. Higher
 layers project a flake's `libOverlays` and `modules` outputs from it,
 and the `projects` argument consumes those projections one level
