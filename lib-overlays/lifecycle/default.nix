@@ -643,6 +643,12 @@ let
       # `overlay` is a nixpkgs overlay. Nothing here applies them; a
       # package set selects from the registry through pkgOverlaysFor.
       pkgOverlays ? null,
+      # `lib: { <name> = <package config evaluation>; }`, given the
+      # bootstrap lib: the package configs this tree declares, by config
+      # name, each the evaluation an integration's constructor returns.
+      # Nothing here interprets them; they are recorded in the full
+      # manifest's `pkgSets`.
+      pkgSets ? null,
     }@resolvedArgs:
     (
       let
@@ -724,6 +730,7 @@ let
         rawConfigs = given "configs" (_lib: { });
         rawLibOverlays = given "libOverlays" (mkLibOverlay: { });
         rawPkgOverlays = given "pkgOverlays" (mkPkgOverlay: { });
+        rawPkgSets = given "pkgSets" (_lib: { });
         rawLibOverlayImports = given "libOverlayImports" (
           lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libManifest.libOverlays publishedNames)
         );
@@ -1134,9 +1141,9 @@ let
         #     overlay registry grafted onto its manifest. It is the lib
         #     `libOverlayImports` receives.
         #   - The bootstrap lib: the forced entries and the selection. It
-        #     is the lib the `modules` and `configs` functions receive, so
-        #     its manifest lacks what they register, and `pkgOverlays`
-        #     with them.
+        #     is the lib the `modules`, `configs` and `pkgSets` functions
+        #     receive, so its manifest lacks what they declare, and
+        #     `pkgOverlays` with them.
         #   - The full lib: the same entries with those registrations
         #     grafted on, and the modules they register composed into the
         #     module registry view. It is the lib mkLib returns.
@@ -1145,8 +1152,9 @@ let
         # records of a lib before everything beneath it exists. The full
         # lib is the full lib of a root declaration, so it is not
         # childless and its chain is empty: no parent, no ancestors,
-        # nothing consumed, and no children until package configs are
-        # built under it. Every stage shares the declared facts. `sources`
+        # nothing consumed and no children; the package configs it
+        # declares are inputs of what is built under it, recorded in
+        # `pkgSets`. Every stage shares the declared facts. `sources`
         # are the pinned sources with each pin recorded against the root,
         # `root` is the tree's identity, and `name` is the declared
         # project name, absent when none is declared. The registries are
@@ -1190,9 +1198,41 @@ let
           history = bootstrapHistory;
         };
 
+        # The package configs, declared in the lib phase so that every
+        # evaluation under this lib can read their sets from the
+        # manifest. They are functions of the bootstrap lib, so the
+        # evaluations an integration builds there have the bootstrap
+        # manifest, which lacks `pkgSets`, as their parent, and the full
+        # manifest lists them without containing itself.
+        pkgSets =
+          let
+            declared =
+              if builtins.isFunction rawPkgSets then
+                rawPkgSets bootstrapLib
+              else
+                throw ''
+                  mkLib expects `pkgSets` to be a function taking the bootstrap
+                  library (`lib: { <name> = <package config>; }`), but got a
+                  ${builtins.typeOf rawPkgSets}.
+                '';
+          in
+          if builtins.isAttrs declared then
+            declared
+          else
+            throw ''
+              mkLib expects `pkgSets` to return an attribute set of package
+              configs keyed by config name, but it returned a
+              ${builtins.typeOf declared}.
+            '';
+
         fullManifest = stageManifest // {
           childless = false;
-          inherit configs entries history;
+          inherit
+            configs
+            entries
+            history
+            pkgSets
+            ;
           modules = registeredModules;
           moduleProjects = registeredModuleProjects;
           pkgOverlays = registeredPkgOverlays;
@@ -1287,7 +1327,8 @@ let
         # stage did not: the selection, and a registration replacing a
         # forced entry under its key, which comes after the entry it
         # replaces, so `definers` names it the winner. The full stage
-        # adds the `modules`, `configs` and `pkgOverlays` registrations.
+        # adds the `modules`, `configs`, `pkgOverlays` and `pkgSets`
+        # registrations.
         #
         # Each event names its manifest (the empty name path: this is
         # the root lib), its type and operation, its key, its index
@@ -1337,7 +1378,14 @@ let
           ++ builtins.map (n: {
             key = "pkgOverlays.${n}";
             origin = originOf registeredPkgOverlays.${n};
-          }) (builtins.attrNames registeredPkgOverlays);
+          }) (builtins.attrNames registeredPkgOverlays)
+          ++ builtins.map (n: {
+            key = "pkgSets.${n}";
+            origin = {
+              project = name;
+              file = null;
+            };
+          }) (builtins.attrNames pkgSets);
         registryEvents =
           offset: registrations:
           builtins.genList (
@@ -1430,6 +1478,7 @@ let
         (builtins.isFunction rawLibOverlays || libOverlays)
         (builtins.isFunction rawLibOverlayImports || libOverlayImports)
         (builtins.isFunction rawPkgOverlays || localPkgOverlays)
+        (builtins.isFunction rawPkgSets || pkgSets)
         (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
         (builtins.isAttrs rawProjects || projects)
         (rawSystems == null || builtins.isList rawSystems || systems)

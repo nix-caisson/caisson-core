@@ -119,6 +119,9 @@ core.mkLib {
                                       # the core lib; defaults to every
                                       # project and local registration
   pkgOverlays = mkPkgOverlay: { };    # named package overlay registrations
+  pkgSets = lib: { };                 # package configs by config name, as
+                                      # an integration's constructor
+                                      # returns them, given the bootstrap lib
   projects = { };                     # consumed upstream contributions,
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
@@ -141,9 +144,9 @@ lib overlay registry grafted onto its manifest; it is the lib
 `libOverlayImports` receives, so a selection refers to entries as
 `lib.caisson-core.libManifest.libOverlays.<name>`. The bootstrap lib
 adds the selection, the `nixpkgs-lib` entry and every integration
-among it; it is the lib `modules` and `configs` receive, and its
-manifest lacks `modules`, `moduleProjects`, `configs` and
-`pkgOverlays`. The full lib is the same entries with those
+among it; it is the lib `modules`, `configs` and `pkgSets` receive,
+and its manifest lacks `modules`, `moduleProjects`, `configs`,
+`pkgOverlays` and `pkgSets`. The full lib is the same entries with those
 registrations grafted on, and it is the lib `mkLib` returns. The core
 and bootstrap manifests have `childless = true`. A registration made
 at either earlier stage still closes over the full lib: the
@@ -271,8 +274,13 @@ tree, `pin.dir` kept otherwise), `root` (null for a composition that
 is not a top), `defaultEcosystemSrc`, `systems`, `name`, the raw
 `projects` capture, the registered
 `libOverlays`, `modules` and `pkgOverlays` dictionaries (project
-entries prefixed, locals winning), `moduleProjects`, and the `configs` registration, which also comes back
-as `caisson-core.configs`. `name` is the project's name as declared
+entries prefixed, locals winning), `moduleProjects`, the `configs` registration, which also comes back
+as `caisson-core.configs`, and `pkgSets`, the package configs as the
+`pkgSets` function returned them. caisson-core does not interpret
+them: the integration whose constructor built them reads them back
+out of the manifest. A config built in the bootstrap lib has that
+lib's manifest, which lacks `pkgSets`, as its parent, so the full
+manifest lists the configs without containing itself. `name` is the project's name as declared
 on `mkLib`, the name the composition holds for itself and the
 namespace its overlays contribute to the composed library, and it is
 absent when none is declared; a layer above gives a configuration no parent declares that
@@ -293,7 +301,7 @@ overlay registrations. The bootstrap stage adds one `layer` event per
 entry it composes that the core stage did not, in composition order:
 the selection, and a registration replacing a caisson-core entry,
 which so comes after the entry it replaces. The full stage adds the
-`modules`, `configs` and `pkgOverlays` registrations.
+`modules`, `configs`, `pkgOverlays` and `pkgSets` registrations.
 Each event has `manifest` (the name path, empty for the root lib),
 `type`, `operation` (`registry` or `layer`), `key`, `index` (its
 position within its operation) and `origin` (`project`, and `file`

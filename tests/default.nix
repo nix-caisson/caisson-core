@@ -375,6 +375,7 @@ let
         libOverlays = true;
         libOverlayImports = true;
         pkgOverlays = true;
+        pkgSets = true;
       }
       && throws (core.mkLib { sources = [ ]; });
 
@@ -994,6 +995,7 @@ let
         "nearest"
         "parent"
         "pkgOverlays"
+        "pkgSets"
         "projects"
         "root"
         "sources"
@@ -1001,6 +1003,7 @@ let
         "type"
       ]
       && manifest.type == "lib"
+      && manifest.pkgSets == { }
       && manifest.childless == false
       && manifest.inputs == [ ]
       && manifest.parent == null
@@ -1240,6 +1243,7 @@ let
           "modules"
           "configs"
           "pkgOverlays"
+          "pkgSets"
           "moduleProjects"
         ];
         lacks = manifest: builtins.all (field: !(manifest ? ${field})) registrationFields;
@@ -1284,6 +1288,53 @@ let
       probe.closureModules.generic ? sibling
       && sibling.closureModules.generic ? probe
       && !probe.closureManifest.childless;
+
+    # `pkgSets` is applied to the bootstrap lib and recorded, as
+    # declared, in the full manifest, with a registry event per config
+    # in the full stage. A config built there sees the bootstrap
+    # manifest, which is childless and lacks `pkgSets`, so the full
+    # manifest lists the configs without containing itself.
+    lifecyclePkgSetsAreDeclaredOnTheBootstrapLib =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          pkgSets = lib: {
+            default = {
+              parent = lib.caisson-core.libManifest;
+            };
+            stable = {
+              parent = lib.caisson-core.libManifest;
+            };
+          };
+        };
+        manifest = composed.caisson-core.libManifest;
+        tail = builtins.genList (i: builtins.elemAt manifest.history (builtins.length manifest.history - 2 + i)) 2;
+      in
+      builtins.attrNames manifest.pkgSets == [
+        "default"
+        "stable"
+      ]
+      && manifest.pkgSets.default.parent.childless
+      && !(manifest.pkgSets.default.parent ? pkgSets)
+      && builtins.map (e: "${e.operation}:${e.key}:${e.origin.project}") tail == [
+        "registry:pkgSets.default:probe-project"
+        "registry:pkgSets.stable:probe-project"
+      ];
+
+    lifecyclePkgSetsMustBeAFunctionReturningAnAttrset =
+      throws (
+        core.mkLib {
+          sources = { };
+          pkgSets = { };
+        }
+      )
+      && throws (
+        core.mkLib {
+          sources = { };
+          pkgSets = _lib: [ ];
+        }
+      );
 
     # The history of each stage begins with the history of the stage
     # before it: the prefix consistency the record promises, compared
