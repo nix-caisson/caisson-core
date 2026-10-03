@@ -1178,24 +1178,33 @@ let
             }) (builtins.attrNames modules)
           );
 
-        # The lib is built in three stages, each a new fixpoint over the
+        # The lib is built in four stages, each a new fixpoint over the
         # seed, and each carrying its own manifest as `libManifest`, so
         # `lib.caisson-core.libManifest` is always the record of
-        # the lib being read at the stage that lib is at.
+        # the lib being read at the stage that lib is at. Each stage
+        # exists because something is a function of it.
         #
         #   - The core lib: caisson-core's forced entries, with the lib
         #     overlay registry grafted onto its manifest. It is the lib
         #     `libOverlayImports` receives.
         #   - The bootstrap lib: the forced entries and the selection. It
-        #     is the lib the `modules`, `configs` and `pkgSets` functions
-        #     receive, so its manifest lacks what they declare, and
-        #     `pkgOverlays` with them.
-        #   - The full lib: the same entries with those registrations
-        #     grafted on, and the modules they register composed into the
-        #     module registry view. It is the lib mkLib returns.
+        #     is the lib the `modules` and `configs` functions receive,
+        #     so its manifest lacks what they register, and `pkgOverlays`
+        #     with them.
+        #   - The registered lib: the same entries with those
+        #     registrations grafted on, and the modules they register
+        #     composed into the module registry view. It is the lib the
+        #     `pkgSets` function receives: a package config is a module
+        #     evaluation over the registered modules and package
+        #     overlays, so it needs them, and its manifest lacks
+        #     `pkgSets`, which is what a package config's parent must
+        #     lack.
+        #   - The full lib: the same lib with `pkgSets` grafted on. It
+        #     is the lib mkLib returns.
         #
-        # The core and bootstrap manifests are childless: they are
-        # records of a lib before everything beneath it exists. The full
+        # The core, bootstrap and registered manifests are childless:
+        # they are records of a lib before everything beneath it
+        # exists. The full
         # lib is the full lib of a root declaration, so it is not
         # childless and its chain is empty: no parent, no ancestors,
         # nothing consumed and no children; the package configs it
@@ -1244,24 +1253,33 @@ let
           history = bootstrapHistory;
         };
 
+        registeredManifest = stageManifest // {
+          childless = true;
+          inherit configs entries;
+          history = registeredHistory;
+          modules = registeredModules;
+          moduleProjects = registeredModuleProjects;
+          pkgOverlays = registeredPkgOverlays;
+        };
+
         # The package configs, declared in the lib phase so that every
         # evaluation under this lib can read their sets from the
-        # manifest. They are functions of the bootstrap lib, and each is
-        # a deferred child an integration's constructor returned, which
-        # is finalized here with the name it is declared under and the
-        # bootstrap manifest as its parent. That manifest lacks
+        # manifest. They are functions of the registered lib, and each
+        # is a deferred child an integration's constructor returned,
+        # which is finalized here with the name it is declared under and
+        # the registered manifest as its parent. That manifest lacks
         # `pkgSets`, so the full manifest lists them without containing
         # itself.
         pkgSets =
           let
             declared =
               if builtins.isFunction rawPkgSets then
-                rawPkgSets bootstrapLib
+                rawPkgSets registeredLib
               else
                 throw ''
-                  mkLib expects `pkgSets` to be a function taking the bootstrap
-                  library (`lib: { <name> = <package config>; }`), but got a
-                  ${builtins.typeOf rawPkgSets}.
+                  mkLib expects `pkgSets` to be a function taking the library
+                  with the registrations (`lib: { <name> = <package config>; }`),
+                  but got a ${builtins.typeOf rawPkgSets}.
                 '';
           in
           if builtins.isAttrs declared then
@@ -1269,7 +1287,7 @@ let
               name: child:
               finalizeChild {
                 inherit name;
-                parent = bootstrapManifest;
+                parent = registeredManifest;
                 what = "`pkgSets.${name}`";
               } child
             ) declared
@@ -1280,21 +1298,13 @@ let
               ${builtins.typeOf declared}.
             '';
 
-        fullManifest = stageManifest // {
+        fullManifest = registeredManifest // {
           childless = false;
-          inherit
-            configs
-            entries
-            history
-            pkgSets
-            ;
-          modules = registeredModules;
-          moduleProjects = registeredModuleProjects;
-          pkgOverlays = registeredPkgOverlays;
+          inherit history pkgSets;
         };
 
-        # The constructors that make registry entries, as the core and
-        # bootstrap libs hold them. A registration closes over its
+        # The constructors that make registry entries, as the core,
+        # bootstrap and registered libs hold them. A registration closes over its
         # author's composition, the lib whose `caisson-core.modules` is
         # the author's registry, and for the registrations made at those
         # stages that is the full lib, not the lib the registry function
@@ -1428,6 +1438,19 @@ let
         } { };
         bootstrapLib = bootstrapComposition.lib;
 
+        registeredComposition = stage {
+          composeArgs = { inherit published; };
+          overlays = importedLibOverlays ++ [
+            projectModulesOverlay
+            localModulesOverlay
+          ];
+          manifest = registeredManifest;
+          extra = registrationConstructors // {
+            inherit configs;
+          };
+        } { };
+        registeredLib = registeredComposition.lib;
+
         composition = stage {
           composeArgs = { inherit published; };
           overlays = importedLibOverlays ++ [
@@ -1467,9 +1490,9 @@ let
         # adds a `layer` event for each entry it composes that the core
         # stage did not: the selection, and a registration replacing a
         # forced entry under its key, which comes after the entry it
-        # replaces, so `definers` names it the winner. The full stage
-        # adds the `modules`, `configs`, `pkgOverlays` and `pkgSets`
-        # registrations.
+        # replaces, so `definers` names it the winner. The registered
+        # stage adds the `modules`, `configs` and `pkgOverlays`
+        # registrations, and the full stage the `pkgSets` ones.
         #
         # Each event names its manifest (the empty name path: this is
         # the root lib), its type and operation, its key, its index
@@ -1491,7 +1514,7 @@ let
           key = "libOverlays.${n}";
           origin = originOf registeredLibOverlays.${n};
         }) (builtins.attrNames registeredLibOverlays);
-        fullRegistrations =
+        registeredRegistrations =
           builtins.concatMap (
             class:
             builtins.map (n: {
@@ -1519,14 +1542,14 @@ let
           ++ builtins.map (n: {
             key = "pkgOverlays.${n}";
             origin = originOf registeredPkgOverlays.${n};
-          }) (builtins.attrNames registeredPkgOverlays)
-          ++ builtins.map (n: {
-            key = "pkgSets.${n}";
-            origin = {
-              project = name;
-              file = null;
-            };
-          }) (builtins.attrNames pkgSets);
+          }) (builtins.attrNames registeredPkgOverlays);
+        pkgSetRegistrations = builtins.map (n: {
+          key = "pkgSets.${n}";
+          origin = {
+            project = name;
+            file = null;
+          };
+        }) (builtins.attrNames pkgSets);
         registryEvents =
           offset: registrations:
           builtins.genList (
@@ -1603,8 +1626,13 @@ let
 
         coreHistory = layerEvents 0 coreLayers ++ registryEvents 0 libOverlayRegistrations;
         bootstrapHistory = coreHistory ++ layerEvents (builtins.length coreLayers) bootstrapLayers;
+        registeredHistory =
+          bootstrapHistory ++ registryEvents (builtins.length libOverlayRegistrations) registeredRegistrations;
         history =
-          bootstrapHistory ++ registryEvents (builtins.length libOverlayRegistrations) fullRegistrations;
+          registeredHistory
+          ++ registryEvents (
+            builtins.length libOverlayRegistrations + builtins.length registeredRegistrations
+          ) pkgSetRegistrations;
 
       in
       # Surface argument-shape errors as soon as the result is used,

@@ -121,7 +121,7 @@ core.mkLib {
   pkgOverlays = mkPkgOverlay: { };    # named package overlay registrations
   pkgSets = lib: { };                 # package configs by config name, each
                                       # an integration's mkConfiguration
-                                      # call, given the bootstrap lib
+                                      # call, given the registered lib
   projects = { };                     # consumed upstream contributions,
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
@@ -137,19 +137,23 @@ unexpected argument is Nix's own error at the call site, naming
 `mkLib` and pointing at the pattern, whose comments say what each
 argument is.
 
-The library is built in three stages, each a new fixpoint over the
-empty seed with its own manifest in `caisson-core.libManifest`. The
-core lib holds caisson-core's own entries and nothing else, with the
-lib overlay registry grafted onto its manifest; it is the lib
+The library is built in four stages, each a new fixpoint over the
+empty seed with its own manifest in `caisson-core.libManifest`, and
+each there because some argument is a function of it. The core lib
+holds caisson-core's own entries and nothing else, with the lib
+overlay registry grafted onto its manifest; it is the lib
 `libOverlayImports` receives, so a selection refers to entries as
 `lib.caisson-core.libManifest.libOverlays.<name>`. The bootstrap lib
 adds the selection, the `nixpkgs-lib` entry and every integration
-among it; it is the lib `modules`, `configs` and `pkgSets` receive,
-and its manifest lacks `modules`, `moduleProjects`, `configs`,
-`pkgOverlays` and `pkgSets`. The full lib is the same entries with those
-registrations grafted on, and it is the lib `mkLib` returns. The core
-and bootstrap manifests have `childless = true`. A registration made
-at either earlier stage still closes over the full lib: the
+among it; it is the lib `modules` and `configs` receive, and its
+manifest lacks `modules`, `moduleProjects`, `configs`, `pkgOverlays`
+and `pkgSets`. The registered lib is the same entries with those
+registrations grafted on; it is the lib `pkgSets` receives, since a
+package config selects from the registered modules and package
+overlays, and its manifest lacks `pkgSets`. The full lib adds
+`pkgSets`, and it is the lib `mkLib` returns. The core, bootstrap and
+registered manifests have `childless = true`. A registration made
+at an earlier stage still closes over the full lib: the
 constructors those libs hold (`mkModule` and every class-bound
 `mkModule` made from it, `mkLibOverlay`, `mkPkgOverlay`) give
 `closure-lib` the full lib, whose `caisson-core.modules` is the
@@ -282,8 +286,8 @@ finalize; }`, because a configuration learns its name and its parent
 from where it is declared: `finalizeChild { name; parent; } child`
 calls its `finalize` with both and requires a manifest back. `mkLib`
 finalizes each `pkgSets` entry with the name it is declared under and
-the bootstrap manifest as its parent, and refuses an entry that is
-not a deferred child. The bootstrap manifest lacks `pkgSets`, so the
+the registered manifest as its parent, and refuses an entry that is
+not a deferred child. The registered manifest lacks `pkgSets`, so the
 full manifest lists the configs without containing itself, and
 caisson-core interprets nothing in them beyond the manifest shape. `name` is the project's name as declared
 on `mkLib`, the name the composition holds for itself and the
@@ -305,8 +309,9 @@ stage records one `layer` event per caisson-core entry, then the lib
 overlay registrations. The bootstrap stage adds one `layer` event per
 entry it composes that the core stage did not, in composition order:
 the selection, and a registration replacing a caisson-core entry,
-which so comes after the entry it replaces. The full stage adds the
-`modules`, `configs`, `pkgOverlays` and `pkgSets` registrations.
+which so comes after the entry it replaces. The registered stage adds
+the `modules`, `configs` and `pkgOverlays` registrations, and the full
+stage the `pkgSets` ones.
 Each event has `manifest` (the name path, empty for the root lib),
 `type`, `operation` (`registry` or `layer`), `key`, `index` (its
 position within its operation) and `origin` (`project`, and `file`
@@ -327,8 +332,9 @@ carries `caisson-core.withManifests { pkgsManifest = manifest; }`,
 which rebuilds that stage from its declaration with the given phase
 manifests filled in: the same entries and `libManifest`, composed as a
 new fixpoint, so everything that reads one through the fixpoint sees
-it. It is how the nixpkgs integration hands out `pkgs.lib`, the
-bootstrap lib with `pkgsManifest` filled in. Only `pkgsManifest` and
+it. It is how the nixpkgs integration hands out `pkgs.lib`, the lib
+the package config was declared under (the registered lib, for a
+`pkgSets` entry) with `pkgsManifest` filled in. Only `pkgsManifest` and
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
 lib carries `withManifests` too, keeping what is already filled in. Every manifest carries
 `_type = "caisson-manifest"`, and `manifestOf` finds one in whatever
