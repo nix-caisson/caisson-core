@@ -119,9 +119,9 @@ core.mkLib {
                                       # the core lib; defaults to every
                                       # project and local registration
   pkgOverlays = mkPkgOverlay: { };    # named package overlay registrations
-  pkgSets = lib: { };                 # package configs by config name, as
-                                      # an integration's constructor
-                                      # returns them, given the bootstrap lib
+  pkgSets = lib: { };                 # package configs by config name, each
+                                      # an integration's mkConfiguration
+                                      # call, given the bootstrap lib
   projects = { };                     # consumed upstream contributions,
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
@@ -201,8 +201,8 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three phase manifests
-(`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf` and
-`definers`,
+(`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
+`definers`, `mkDeferredChild` and `finalizeChild`,
 plus `compose`,
 `resolve`, `importApply`, `callConsumerFlake`, and the pin readers
 `pins`. A registered overlay file takes the closure
@@ -275,12 +275,17 @@ is not a top), `defaultEcosystemSrc`, `systems`, `name`, the raw
 `projects` capture, the registered
 `libOverlays`, `modules` and `pkgOverlays` dictionaries (project
 entries prefixed, locals winning), `moduleProjects`, the `configs` registration, which also comes back
-as `caisson-core.configs`, and `pkgSets`, the package configs as the
-`pkgSets` function returned them. caisson-core does not interpret
-them: the integration whose constructor built them reads them back
-out of the manifest. A config built in the bootstrap lib has that
-lib's manifest, which lacks `pkgSets`, as its parent, so the full
-manifest lists the configs without containing itself. `name` is the project's name as declared
+as `caisson-core.configs`, and `pkgSets`, the package configs the
+`pkgSets` function declared, each finalized. An integration's
+constructor returns a deferred child, `mkDeferredChild { integration;
+finalize; }`, because a configuration learns its name and its parent
+from where it is declared: `finalizeChild { name; parent; } child`
+calls its `finalize` with both and requires a manifest back. `mkLib`
+finalizes each `pkgSets` entry with the name it is declared under and
+the bootstrap manifest as its parent, and refuses an entry that is
+not a deferred child. The bootstrap manifest lacks `pkgSets`, so the
+full manifest lists the configs without containing itself, and
+caisson-core interprets nothing in them beyond the manifest shape. `name` is the project's name as declared
 on `mkLib`, the name the composition holds for itself and the
 namespace its overlays contribute to the composed library, and it is
 absent when none is declared; a layer above gives a configuration no parent declares that

@@ -477,6 +477,52 @@ let
     in
     if found == [ ] then null else builtins.head found;
 
+  # A deferred child: what an integration's constructor returns. It
+  # is not yet an evaluation, since a configuration learns its name
+  # and its parent from where it is declared; the parent finalizes it
+  # with both. `finalize` is `{ name, parent }: <manifest>`, `parent`
+  # being the parent's childless manifest.
+  mkDeferredChild =
+    {
+      integration,
+      finalize,
+    }:
+    if !builtins.isString integration then
+      throw "caisson-core.mkDeferredChild expects `integration` to be the integration's name, but got a ${builtins.typeOf integration}."
+    else if !builtins.isFunction finalize then
+      throw "caisson-core.mkDeferredChild expects `finalize` to be a function `{ name, parent }: <manifest>`, but got a ${builtins.typeOf finalize}."
+    else
+      {
+        _type = "caisson-deferred-child";
+        inherit integration finalize;
+      };
+
+  # Finalize a deferred child with the name it is declared under and
+  # its parent's childless manifest. `what` names the declaration in
+  # the messages. The result must be a manifest.
+  finalizeChild =
+    {
+      name,
+      parent,
+      what ? "`${name}`",
+    }:
+    child:
+    if !(builtins.isAttrs child && (child._type or null) == "caisson-deferred-child") then
+      throw ''
+        ${what} is declared with a ${
+          if builtins.isAttrs child then "set that is not a configuration" else builtins.typeOf child
+        }, where a configuration is expected: build it with an integration's
+        `mkConfiguration` (for a package config, `lib.caisson.nixpkgs.mkConfiguration`).
+      ''
+    else
+      let
+        manifest = child.finalize { inherit name parent; };
+      in
+      if builtins.isAttrs manifest && (manifest._type or null) == "caisson-manifest" then
+        manifest
+      else
+        throw "The ${child.integration} configuration ${what} did not finalize to a manifest.";
+
   # The layers that define a name, from a manifest's history: given a
   # manifest and an attribute path (`[ "my-project" "helper" ]`), the
   # layer events whose layer defines that path, in composition order,
@@ -1200,10 +1246,12 @@ let
 
         # The package configs, declared in the lib phase so that every
         # evaluation under this lib can read their sets from the
-        # manifest. They are functions of the bootstrap lib, so the
-        # evaluations an integration builds there have the bootstrap
-        # manifest, which lacks `pkgSets`, as their parent, and the full
-        # manifest lists them without containing itself.
+        # manifest. They are functions of the bootstrap lib, and each is
+        # a deferred child an integration's constructor returned, which
+        # is finalized here with the name it is declared under and the
+        # bootstrap manifest as its parent. That manifest lacks
+        # `pkgSets`, so the full manifest lists them without containing
+        # itself.
         pkgSets =
           let
             declared =
@@ -1217,7 +1265,14 @@ let
                 '';
           in
           if builtins.isAttrs declared then
-            declared
+            builtins.mapAttrs (
+              name: child:
+              finalizeChild {
+                inherit name;
+                parent = bootstrapManifest;
+                what = "`pkgSets.${name}`";
+              } child
+            ) declared
           else
             throw ''
               mkLib expects `pkgSets` to return an attribute set of package
@@ -1581,9 +1636,11 @@ in
         contributeModules
         coreEntries
         definers
+        finalizeChild
         importApply
         manifestOf
         mkExtendedLib
+        mkDeferredChild
         mkLib
         mkNixpkgsLibEntry
         pkgOverlaysFor
