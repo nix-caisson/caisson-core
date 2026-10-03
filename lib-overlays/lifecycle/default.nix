@@ -477,29 +477,15 @@ let
     in
     if found == [ ] then null else builtins.head found;
 
-  # A deferred child: what an integration's constructor returns. It
-  # is not yet an evaluation, since a configuration learns its name
-  # and its parent from where it is declared; the parent finalizes it
-  # with both. `finalize` is `{ name, parent }: <manifest>`, `parent`
-  # being the parent's childless manifest.
-  mkDeferredChild =
-    {
-      integration,
-      finalize,
-    }:
-    if !builtins.isString integration then
-      throw "caisson-core.mkDeferredChild expects `integration` to be the integration's name, but got a ${builtins.typeOf integration}."
-    else if !builtins.isFunction finalize then
-      throw "caisson-core.mkDeferredChild expects `finalize` to be a function `{ name, parent }: <manifest>`, but got a ${builtins.typeOf finalize}."
-    else
-      {
-        _type = "caisson-deferred-child";
-        inherit integration finalize;
-      };
-
-  # Finalize a deferred child with the name it is declared under and
-  # its parent's childless manifest. `what` names the declaration in
-  # the messages. The result must be a manifest.
+  # Finalize a child configuration. What an integration's
+  # `mkConfiguration` returns is a function `{ name, parent }:
+  # <manifest>`, since a configuration learns its name and its parent
+  # from where it is declared; the parent calls it with the name the
+  # child is declared under and its own childless manifest. The
+  # function's pattern must name exactly `name` and `parent`, which
+  # `builtins.functionArgs` reads, so anything else declared where a
+  # configuration belongs is refused there. `what` names the
+  # declaration in the messages. The result must be a manifest.
   finalizeChild =
     {
       name,
@@ -507,21 +493,32 @@ let
       what ? "`${name}`",
     }:
     child:
-    if !(builtins.isAttrs child && (child._type or null) == "caisson-deferred-child") then
+    let
+      expected = {
+        name = false;
+        parent = false;
+      };
+    in
+    if !(builtins.isFunction child && builtins.functionArgs child == expected) then
       throw ''
-        ${what} is declared with a ${
-          if builtins.isAttrs child then "set that is not a configuration" else builtins.typeOf child
-        }, where a configuration is expected: build it with an integration's
-        `mkConfiguration` (for a package config, `lib.caisson.nixpkgs.mkConfiguration`).
+        ${what} is declared with ${
+          if builtins.isFunction child then
+            "a function that does not take exactly `{ name, parent }`"
+          else
+            "a ${builtins.typeOf child}"
+        }, where a configuration is expected: a function of
+        `{ name, parent }` returning a manifest, as an integration's
+        `mkConfiguration` builds one (for a package config,
+        `lib.caisson.nixpkgs.mkConfiguration`).
       ''
     else
       let
-        manifest = child.finalize { inherit name parent; };
+        manifest = child { inherit name parent; };
       in
       if builtins.isAttrs manifest && (manifest._type or null) == "caisson-manifest" then
         manifest
       else
-        throw "The ${child.integration} configuration ${what} did not finalize to a manifest.";
+        throw "The configuration ${what} did not return a manifest.";
 
   # The layers that define a name, from a manifest's history: given a
   # manifest and an attribute path (`[ "my-project" "helper" ]`), the
@@ -1264,10 +1261,11 @@ let
 
         # The package configs, declared in the lib phase so that every
         # evaluation under this lib can read their sets from the
-        # manifest. They are functions of the registered lib, and each
-        # is a deferred child an integration's constructor returned,
-        # which is finalized here with the name it is declared under and
-        # the registered manifest as its parent. That manifest lacks
+        # manifest. The `pkgSets` function receives the registered lib,
+        # and each config it declares is a function of `{ name, parent }`
+        # that an integration's `mkConfiguration` returned, called here
+        # with the name it is declared under and the registered manifest
+        # as its parent. That manifest lacks
         # `pkgSets`, so the full manifest lists them without containing
         # itself.
         pkgSets =
@@ -1668,7 +1666,6 @@ in
         importApply
         manifestOf
         mkExtendedLib
-        mkDeferredChild
         mkLib
         mkNixpkgsLibEntry
         pkgOverlaysFor
