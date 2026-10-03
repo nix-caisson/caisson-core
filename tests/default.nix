@@ -1291,30 +1291,26 @@ let
 
     # `pkgSets` is applied to the registered lib, the bootstrap lib with
     # `modules`, `configs` and `pkgOverlays` grafted on, since a package
-    # config selects from those registries. Each entry, a deferred
-    # child, is finalized with the name it is declared under and the
+    # config selects from those registries. Each entry, a function of
+    # `{ name, parent }`, is called with the name it is declared under and the
     # registered manifest as its parent, then recorded in the full
     # manifest with a registry event per config in the full stage. The
     # registered manifest is childless and lacks `pkgSets`, so the full
     # manifest lists the configs without containing itself.
     lifecyclePkgSetsAreFinalizedUnderTheRegisteredManifest =
       let
-        # A stub integration's constructor: the manifest it finalizes
-        # to records its name and parent, and the lib the constructor
-        # was called through.
+        # A stub integration's constructor: the manifest its function
+        # returns records its name and parent, and the lib the
+        # constructor was called through.
         stubConfiguration =
           lib:
-          core.mkDeferredChild {
-            integration = "stub";
-            finalize =
-              { name, parent }:
-              {
-                _type = "caisson-manifest";
-                type = "stub";
-                inherit name parent;
-                calledThrough = lib.caisson-core.libManifest;
-                registryThrough = lib.caisson-core.modules;
-              };
+          { name, parent }:
+          {
+            _type = "caisson-manifest";
+            type = "stub";
+            inherit name parent;
+            calledThrough = lib.caisson-core.libManifest;
+            registryThrough = lib.caisson-core.modules;
           };
         composed = core.mkLib {
           sources = { };
@@ -1359,9 +1355,11 @@ let
         "registry:pkgSets.stable:probe-project"
       ];
 
-    # An entry that is not a deferred child is refused, as is a deferred
-    # child that finalizes to something other than a manifest, and the
-    # constructor checks its arguments.
+    # An entry must be a function whose pattern names exactly `name`
+    # and `parent`: an attrset, a function of anything else and a
+    # function with a third argument are refused where they are
+    # declared, and a function returning something other than a
+    # manifest is refused when called.
     lifecyclePkgSetsEntriesMustBeConfigurations =
       let
         pkgSetsOf =
@@ -1370,23 +1368,28 @@ let
             sources = { };
             pkgSets = _lib: declared;
           }).caisson-core.libManifest.pkgSets;
+        manifest = {
+          _type = "caisson-manifest";
+          type = "stub";
+        };
+        accepted = pkgSetsOf { default = { name, parent }: manifest // { inherit name; }; };
       in
-      throws (pkgSetsOf { default = { }; }).default
-      && throws
-        (pkgSetsOf {
-          default = core.mkDeferredChild {
-            integration = "stub";
-            finalize = _: { };
-          };
-        }).default
-      && throws (core.mkDeferredChild {
-        integration = 1;
-        finalize = _: { };
-      })
-      && throws (core.mkDeferredChild {
-        integration = "stub";
-        finalize = { };
-      });
+      accepted.default.name == "default"
+      && throws (pkgSetsOf { default = { }; }).default
+      && throws (pkgSetsOf { default = _: manifest; }).default
+      && throws (pkgSetsOf { default = { name, ... }: manifest; }).default
+      && throws (
+        pkgSetsOf {
+          default =
+            {
+              name,
+              parent,
+              extra,
+            }:
+            manifest;
+        }
+      ).default
+      && throws (pkgSetsOf { default = { name, parent }: { }; }).default;
 
     # `withManifests` rebuilds a stage from its declaration with phase
     # manifests filled in: the same entries and `libManifest`, a new

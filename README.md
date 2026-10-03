@@ -206,7 +206,7 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
-`definers`, `mkDeferredChild` and `finalizeChild`,
+`definers` and `finalizeChild`,
 plus `compose`,
 `resolve`, `importApply`, `callConsumerFlake`, and the pin readers
 `pins`. A registered overlay file takes the closure
@@ -280,14 +280,15 @@ is not a top), `defaultEcosystemSrc`, `systems`, `name`, the raw
 `libOverlays`, `modules` and `pkgOverlays` dictionaries (project
 entries prefixed, locals winning), `moduleProjects`, the `configs` registration, which also comes back
 as `caisson-core.configs`, and `pkgSets`, the package configs the
-`pkgSets` function declared, each finalized. An integration's
-constructor returns a deferred child, `mkDeferredChild { integration;
-finalize; }`, because a configuration learns its name and its parent
-from where it is declared: `finalizeChild { name; parent; } child`
-calls its `finalize` with both and requires a manifest back. `mkLib`
-finalizes each `pkgSets` entry with the name it is declared under and
-the registered manifest as its parent, and refuses an entry that is
-not a deferred child. The registered manifest lacks `pkgSets`, so the
+`pkgSets` function declared, each finalized. A configuration learns
+its name and its parent from where it is declared, so an integration's
+`mkConfiguration` returns a function `{ name, parent }: <manifest>`:
+`finalizeChild { name; parent; } child` calls it with both, after
+checking with `builtins.functionArgs` that its pattern names exactly
+`name` and `parent`, and requires a manifest back. `mkLib` finalizes
+each `pkgSets` entry with the name it is declared under and the
+registered manifest as its parent, so anything else declared there is
+refused where it is declared. The registered manifest lacks `pkgSets`, so the
 full manifest lists the configs without containing itself, and
 caisson-core interprets nothing in them beyond the manifest shape. `name` is the project's name as declared
 on `mkLib`, the name the composition holds for itself and the
