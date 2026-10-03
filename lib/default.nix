@@ -28,7 +28,7 @@
 #     position; the last occurrence supplies its value (replacement).
 #     A replacement's imports are still walked, so entries it
 #     introduces join the composition, but at the walk's current end:
-#     a replacement inherits the replaced entry's slot, and its
+#     a replacement inherits the replaced entry's position, and its
 #     imports guarantee reachability, not precedence.
 #   - A key already on the walk's own path is skipped, so cycles
 #     terminate; members of a cycle get no mutual ordering guarantee.

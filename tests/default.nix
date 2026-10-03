@@ -206,7 +206,7 @@ let
       in
       r.lib.foo == "patched-orig";
 
-    replacementInheritsSlot =
+    replacementInheritsPosition =
       let
         k1 = entry "test.k" [ ] (
           _final: prev: {
@@ -1019,9 +1019,9 @@ let
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
 
-    # The three phase slots are present on every composed library;
-    # mkLib fills the lib one and leaves the other two null.
-    lifecycleManifestSlotsArePresentAndNullUntilFilled =
+    # The three phase manifests are present on every composed library;
+    # mkLib fills in the lib one and leaves the other two null.
+    lifecyclePhaseManifestsArePresentAndNullUntilFilledIn =
       let
         composed = core.mkLib {
           sources = { };
@@ -1041,14 +1041,14 @@ let
           name = "probe";
         };
         libManifest = composed.caisson-core.libManifest;
-        # A lib with a later slot filled, as a package set's or an
+        # A lib with a later phase manifest filled in, as a package set's or an
         # evaluation's lib carries it.
-        withSlot =
-          slot: tag:
+        withPhase =
+          attr: tag:
           composed
           // {
             caisson-core = composed.caisson-core // {
-              ${slot} = {
+              ${attr} = {
                 _type = "caisson-manifest";
                 inherit tag;
               };
@@ -1061,9 +1061,9 @@ let
       && manifestOf { lib = composed; } == libManifest
       && manifestOf { caisson.manifest = libManifest; } == libManifest
       && manifestOf { config.caisson.manifest = libManifest; } == libManifest
-      && (manifestOf (withSlot "pkgsManifest" "pkgs")).tag == "pkgs"
-      && (manifestOf { lib = withSlot "pkgsManifest" "pkgs"; }).tag == "pkgs"
-      && (manifestOf (withSlot "evalManifest" "eval")).tag == "eval"
+      && (manifestOf (withPhase "pkgsManifest" "pkgs")).tag == "pkgs"
+      && (manifestOf { lib = withPhase "pkgsManifest" "pkgs"; }).tag == "pkgs"
+      && (manifestOf (withPhase "evalManifest" "eval")).tag == "eval"
       && manifestOf { } == null
       && manifestOf { caisson.manifest = { }; } == null
       && manifestOf { config = 1; } == null
@@ -1321,6 +1321,60 @@ let
         "registry:pkgSets.default:probe-project"
         "registry:pkgSets.stable:probe-project"
       ];
+
+    # `withManifests` rebuilds a stage from its declaration with phase
+    # manifests filled in: the same entries and `libManifest`, a new
+    # fixpoint, so an overlay reading `pkgsManifest` through `final`
+    # sees it, and `manifestOf` finds it as the last one filled in.
+    # Further calls keep what is already filled in.
+    lifecycleWithManifestsRebuildsTheStage =
+      let
+        pkgsRecord = {
+          _type = "caisson-manifest";
+          type = "nixpkgs";
+          name = "x86_64-linux";
+        };
+        evalRecord = {
+          _type = "caisson-manifest";
+          type = "probe";
+        };
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = mkLibOverlay: {
+            reader = mkLibOverlay (
+              { ... }:
+              {
+                overlay = final: _prev: { readPkgsManifest = final.caisson-core.pkgsManifest; };
+              }
+            );
+          };
+          configs = lib: { generic.probe.bootstrapSeen = lib; };
+        };
+        bootstrapLib = composed.caisson-core.configs.generic.probe.bootstrapSeen;
+        rebuilt = bootstrapLib.caisson-core.withManifests { pkgsManifest = pkgsRecord; };
+        twice = rebuilt.caisson-core.withManifests { evalManifest = evalRecord; };
+        fullRebuilt = composed.caisson-core.withManifests { pkgsManifest = pkgsRecord; };
+      in
+      bootstrapLib.caisson-core.pkgsManifest == null
+      && bootstrapLib.readPkgsManifest == null
+      && rebuilt.caisson-core.pkgsManifest == pkgsRecord
+      && rebuilt.readPkgsManifest == pkgsRecord
+      && rebuilt.caisson-core.libManifest.childless
+      && rebuilt.caisson-core.libManifest.entries == bootstrapLib.caisson-core.libManifest.entries
+      && core.manifestOf rebuilt == pkgsRecord
+      && twice.caisson-core.pkgsManifest == pkgsRecord
+      && twice.caisson-core.evalManifest == evalRecord
+      && fullRebuilt.caisson-core.libManifest.pkgSets == { };
+
+    lifecycleWithManifestsFillsInOnlyPhaseManifests =
+      let
+        composed = core.mkLib { sources = { }; };
+        fill = given: (composed.caisson-core.withManifests given).caisson-core;
+      in
+      throws (fill { libManifest = null; }).libManifest
+      && throws (fill { pkgsManifest = { }; }).pkgsManifest
+      && throws (fill [ ]).pkgsManifest
+      && (fill { pkgsManifest = null; }).pkgsManifest == null;
 
     lifecyclePkgSetsMustBeAFunctionReturningAnAttrset =
       throws (
