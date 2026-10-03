@@ -1289,38 +1289,104 @@ let
       && sibling.closureModules.generic ? probe
       && !probe.closureManifest.childless;
 
-    # `pkgSets` is applied to the bootstrap lib and recorded, as
-    # declared, in the full manifest, with a registry event per config
-    # in the full stage. A config built there sees the bootstrap
-    # manifest, which is childless and lacks `pkgSets`, so the full
+    # `pkgSets` is applied to the registered lib, the bootstrap lib with
+    # `modules`, `configs` and `pkgOverlays` grafted on, since a package
+    # config selects from those registries. Each entry, a deferred
+    # child, is finalized with the name it is declared under and the
+    # registered manifest as its parent, then recorded in the full
+    # manifest with a registry event per config in the full stage. The
+    # registered manifest is childless and lacks `pkgSets`, so the full
     # manifest lists the configs without containing itself.
-    lifecyclePkgSetsAreDeclaredOnTheBootstrapLib =
+    lifecyclePkgSetsAreFinalizedUnderTheRegisteredManifest =
       let
+        # A stub integration's constructor: the manifest it finalizes
+        # to records its name and parent, and the lib the constructor
+        # was called through.
+        stubConfiguration =
+          lib:
+          core.mkDeferredChild {
+            integration = "stub";
+            finalize =
+              { name, parent }:
+              {
+                _type = "caisson-manifest";
+                type = "stub";
+                inherit name parent;
+                calledThrough = lib.caisson-core.libManifest;
+                registryThrough = lib.caisson-core.modules;
+              };
+          };
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
+          modules = lib: {
+            generic.local = lib.caisson-core.mkModule "generic" ({ ... }: { });
+          };
+          pkgOverlays = mkPkgOverlay: {
+            tool = mkPkgOverlay ({ ... }: { overlay = _final: _prev: { }; });
+          };
           pkgSets = lib: {
-            default = {
-              parent = lib.caisson-core.libManifest;
-            };
-            stable = {
-              parent = lib.caisson-core.libManifest;
-            };
+            default = stubConfiguration lib;
+            stable = stubConfiguration lib;
           };
         };
         manifest = composed.caisson-core.libManifest;
+        default = manifest.pkgSets.default;
         tail = builtins.genList (i: builtins.elemAt manifest.history (builtins.length manifest.history - 2 + i)) 2;
+        identity = e: "${e.operation}:${e.key}:${toString e.index}";
+        registeredHistory = builtins.map identity default.parent.history;
       in
       builtins.attrNames manifest.pkgSets == [
         "default"
         "stable"
       ]
-      && manifest.pkgSets.default.parent.childless
-      && !(manifest.pkgSets.default.parent ? pkgSets)
+      && default.name == "default"
+      && manifest.pkgSets.stable.name == "stable"
+      && default.parent.childless
+      && !(default.parent ? pkgSets)
+      && default.parent.entries == manifest.entries
+      && default.parent.modules.generic ? local
+      && default.parent.pkgOverlays ? tool
+      && default.calledThrough.childless
+      && default.registryThrough.generic ? local
+      && registeredHistory
+      == builtins.genList (i: identity (builtins.elemAt manifest.history i)) (
+        builtins.length registeredHistory
+      )
+      && builtins.length manifest.history == builtins.length registeredHistory + 2
       && builtins.map (e: "${e.operation}:${e.key}:${e.origin.project}") tail == [
         "registry:pkgSets.default:probe-project"
         "registry:pkgSets.stable:probe-project"
       ];
+
+    # An entry that is not a deferred child is refused, as is a deferred
+    # child that finalizes to something other than a manifest, and the
+    # constructor checks its arguments.
+    lifecyclePkgSetsEntriesMustBeConfigurations =
+      let
+        pkgSetsOf =
+          declared:
+          (core.mkLib {
+            sources = { };
+            pkgSets = _lib: declared;
+          }).caisson-core.libManifest.pkgSets;
+      in
+      throws (pkgSetsOf { default = { }; }).default
+      && throws
+        (pkgSetsOf {
+          default = core.mkDeferredChild {
+            integration = "stub";
+            finalize = _: { };
+          };
+        }).default
+      && throws (core.mkDeferredChild {
+        integration = 1;
+        finalize = _: { };
+      })
+      && throws (core.mkDeferredChild {
+        integration = "stub";
+        finalize = { };
+      });
 
     # `withManifests` rebuilds a stage from its declaration with phase
     # manifests filled in: the same entries and `libManifest`, a new
