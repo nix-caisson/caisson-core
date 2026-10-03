@@ -1278,24 +1278,106 @@ let
           }) publishedNames
         );
 
-        coreComposition = composeRegistered { } (
-          builtins.map (name: forcedLibOverlays.${name}) coreNames ++ [ (manifestOverlay coreManifest registrationConstructors) ]
-        );
+        # The phase slots a later phase fills on a lib it hands out:
+        # `pkgsManifest` on the lib inside a package set, `evalManifest`
+        # on the lib a module evaluation is built with. `libManifest` is
+        # the record of the stage itself and is not among them.
+        phaseSlots = [
+          "pkgsManifest"
+          "evalManifest"
+        ];
+        checkedSlots =
+          slots:
+          if !builtins.isAttrs slots then
+            throw ''
+              caisson-core.withSlots expects an attribute set of phase slots
+              (`{ pkgsManifest = <manifest>; }`), but got a ${builtins.typeOf slots}.
+            ''
+          else
+            let
+              # Refused when the slots are merged, not when a slot is
+              # read: an unknown name such as `libManifest` is shadowed
+              # by the stage's own binding and would never be read.
+              unknown = builtins.filter (slot: !(builtins.elem slot phaseSlots)) (builtins.attrNames slots);
+            in
+            if unknown != [ ] then
+              throw ''
+                caisson-core.withSlots fills the phase slots ${builtins.concatStringsSep " and " phaseSlots},
+                but was given `${builtins.head unknown}`.
+              ''
+            else
+              builtins.mapAttrs (
+                slot: value:
+                if value == null || (builtins.isAttrs value && (value._type or null) == "caisson-manifest") then
+                  value
+                else
+                  throw ''
+                    caisson-core.withSlots expects `${slot}` to be a manifest (an
+                    attribute set with `_type = "caisson-manifest"`) or null.
+                  ''
+              ) slots;
+
+        # A stage of the lib, composed from its overlays with its
+        # manifest and the given phase slots filled. The stage carries
+        # `caisson-core.withSlots`, which rebuilds it from the same
+        # declaration with more slots filled: a new fixpoint, so
+        # everything that reads a slot through the fixpoint sees the
+        # record, and not an attribute merge over a built lib.
+        stage =
+          {
+            composeArgs,
+            overlays,
+            manifest,
+            extra,
+          }:
+          slots:
+          composeRegistered composeArgs (
+            overlays
+            ++ [
+              (manifestOverlay manifest (
+                extra
+                // slots
+                // {
+                  withSlots =
+                    more:
+                    (stage {
+                      inherit
+                        composeArgs
+                        overlays
+                        manifest
+                        extra
+                        ;
+                    } (slots // checkedSlots more)).lib;
+                }
+              ))
+            ]
+          );
+
+        coreComposition = stage {
+          composeArgs = { };
+          overlays = builtins.map (name: forcedLibOverlays.${name}) coreNames;
+          manifest = coreManifest;
+          extra = registrationConstructors;
+        } { };
         coreLib = coreComposition.lib;
 
-        bootstrapComposition = composeRegistered { inherit published; } (
-          importedLibOverlays ++ [ (manifestOverlay bootstrapManifest registrationConstructors) ]
-        );
+        bootstrapComposition = stage {
+          composeArgs = { inherit published; };
+          overlays = importedLibOverlays;
+          manifest = bootstrapManifest;
+          extra = registrationConstructors;
+        } { };
         bootstrapLib = bootstrapComposition.lib;
 
-        composition = composeRegistered { inherit published; } (
-          importedLibOverlays
-          ++ [
+        composition = stage {
+          composeArgs = { inherit published; };
+          overlays = importedLibOverlays ++ [
             projectModulesOverlay
             localModulesOverlay
-            (manifestOverlay fullManifest { inherit configs; })
-          ]
-        );
+          ];
+          manifest = fullManifest;
+          extra = { inherit configs; };
+        } { };
         finalLib = composition.lib;
 
         # The manifest's `entries`: the selection's keys in composition

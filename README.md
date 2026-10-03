@@ -317,7 +317,15 @@ layer's file. A layer returning `prev.x // { ... }` carries the names
 under `x` without defining them. There is a slot per evaluation phase: `libManifest` is
 filled here, and `pkgsManifest` and `evalManifest` are present and
 null, for the layers that build package sets and module evaluations
-to fill on the libraries they hand out. Every manifest carries
+to fill on the libraries they hand out. Every stage `mkLib` builds
+carries `caisson-core.withSlots { pkgsManifest = manifest; }`, which
+rebuilds that stage from its declaration with the given phase slots
+filled: the same entries and `libManifest`, composed as a new
+fixpoint, so everything that reads a slot through the fixpoint sees
+the record. It is how the nixpkgs integration hands out `pkgs.lib`,
+the bootstrap lib with `pkgsManifest` filled. Only `pkgsManifest` and
+`evalManifest` are accepted, each a manifest or null, and a rebuilt
+lib carries `withSlots` too, keeping the slots already filled. Every manifest carries
 `_type = "caisson-manifest"`, and `manifestOf` finds one in whatever
 a file returns: a manifest, an attrset carrying `caisson.manifest`,
 an evaluated configuration carrying `config.caisson.manifest`, or a

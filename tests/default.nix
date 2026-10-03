@@ -1322,6 +1322,60 @@ let
         "registry:pkgSets.stable:probe-project"
       ];
 
+    # `withSlots` rebuilds a stage from its declaration with phase slots
+    # filled: the same entries and `libManifest`, a new fixpoint, so an
+    # overlay reading the slot through `final` sees it, and
+    # `manifestOf` finds it as the last filled slot. Further calls keep
+    # the slots already filled.
+    lifecycleWithSlotsRebuildsTheStage =
+      let
+        pkgsRecord = {
+          _type = "caisson-manifest";
+          type = "nixpkgs";
+          name = "x86_64-linux";
+        };
+        evalRecord = {
+          _type = "caisson-manifest";
+          type = "probe";
+        };
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = mkLibOverlay: {
+            reader = mkLibOverlay (
+              { ... }:
+              {
+                overlay = final: _prev: { readSlot = final.caisson-core.pkgsManifest; };
+              }
+            );
+          };
+          configs = lib: { generic.probe.bootstrapSeen = lib; };
+        };
+        bootstrapLib = composed.caisson-core.configs.generic.probe.bootstrapSeen;
+        rebuilt = bootstrapLib.caisson-core.withSlots { pkgsManifest = pkgsRecord; };
+        twice = rebuilt.caisson-core.withSlots { evalManifest = evalRecord; };
+        fullRebuilt = composed.caisson-core.withSlots { pkgsManifest = pkgsRecord; };
+      in
+      bootstrapLib.caisson-core.pkgsManifest == null
+      && bootstrapLib.readSlot == null
+      && rebuilt.caisson-core.pkgsManifest == pkgsRecord
+      && rebuilt.readSlot == pkgsRecord
+      && rebuilt.caisson-core.libManifest.childless
+      && rebuilt.caisson-core.libManifest.entries == bootstrapLib.caisson-core.libManifest.entries
+      && core.manifestOf rebuilt == pkgsRecord
+      && twice.caisson-core.pkgsManifest == pkgsRecord
+      && twice.caisson-core.evalManifest == evalRecord
+      && fullRebuilt.caisson-core.libManifest.pkgSets == { };
+
+    lifecycleWithSlotsFillsOnlyPhaseSlotsWithManifests =
+      let
+        composed = core.mkLib { sources = { }; };
+        fill = slots: (composed.caisson-core.withSlots slots).caisson-core;
+      in
+      throws (fill { libManifest = null; }).libManifest
+      && throws (fill { pkgsManifest = { }; }).pkgsManifest
+      && throws (fill [ ]).pkgsManifest
+      && (fill { pkgsManifest = null; }).pkgsManifest == null;
+
     lifecyclePkgSetsMustBeAFunctionReturningAnAttrset =
       throws (
         core.mkLib {
