@@ -7,7 +7,7 @@
 # eval-weight harness. This file must stay self-contained: eval-weight
 # imports it from inside the measurement sandbox by path, without lib
 # (routing measured subjects through the composed lib would leak the
-# framework's own bootstrap cost into the measurements).
+# framework's bootstrap cost into the measurements).
 {
   src,
   inputs ? { },

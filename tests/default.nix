@@ -63,7 +63,7 @@ let
     };
   };
 
-  # The registry names of caisson-core's own entries, present in every
+  # The registry names of caisson-core's entries, present in every
   # mkLib composition.
   coreNames = [
     "caisson-core/compose"
@@ -117,7 +117,7 @@ let
 
   # A tree registering package overlays from a directory, and a tree
   # consuming it as a project beside a local entry that imports the
-  # project's default entry through the consumer's own registry.
+  # project's default entry through the consumer's registry.
   pkgOverlayProducer = core.mkLib {
     sources = { };
     pkgOverlays = core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
@@ -1207,7 +1207,7 @@ let
       }
       && (layer "caisson-core/lifecycle").origin.project == "caisson-core";
 
-    # The lib is built in three stages, each carrying its own manifest.
+    # The lib is built in stages, each carrying a manifest.
     # The core lib, which `libOverlayImports` receives, holds the forced
     # entries and the registry; the bootstrap lib, which `modules` and
     # `configs` receive, adds the selection and lacks what they
@@ -1511,7 +1511,7 @@ let
       );
 
     # A registration under a forced entry's key replaces it from the
-    # bootstrap stage on: the core lib keeps caisson-core's own entry,
+    # bootstrap stage on: the core lib keeps the entry caisson-core ships,
     # the returned lib has the replacement, and the history records the
     # replacement as a later layer, so `definers` names it the winner.
     lifecycleReplacingAForcedEntryAppliesFromBootstrap =
@@ -1822,7 +1822,7 @@ let
       }
     );
 
-    # caisson-core is its own composition: the entries that make the
+    # caisson-core composes itself: the entries that make the
     # top-level value are the ones mkLib composes into a consumer, so
     # a composition assembled with `compose` directly takes them as
     # keyed entries.
