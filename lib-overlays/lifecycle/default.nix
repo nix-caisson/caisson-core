@@ -3,7 +3,7 @@
 # The library lifecycle: building a composed library from registered
 # overlays and modules over the empty seed, with the `caisson-core`
 # namespace (machinery, registries, manifest) composed into the result
-# from caisson-core's own entries. mkLib is the entry point.
+# from caisson-core's entries. mkLib is the entry point.
 #
 # Contracts, shared with `compose`:
 #
@@ -173,7 +173,7 @@ let
       # reach the registry of the composition that registered them),
       # the composition's mkModule and the static contribute helpers
       # arrive through here so overlays can contribute modules and
-      # classes closed over their own flake. Bound lazily: an overlay
+      # classes closed over their flake. Bound lazily: an overlay
       # reads them inside `overlay = final: prev:` or inside a
       # function it defines, never while it is being registered.
       extraOverlayClosure ? { },
@@ -481,7 +481,7 @@ let
   # `mkConfiguration` returns is a function `{ name, parent }:
   # <manifest>`, since a configuration learns its name and its parent
   # from where it is declared; the parent calls it with the name the
-  # child is declared under and its own childless manifest. The
+  # child is declared under and its childless manifest. The
   # function's pattern must name exactly `name` and `parent`, which
   # `builtins.functionArgs` reads, so anything else declared where a
   # configuration belongs is refused there. `what` names the
@@ -643,7 +643,7 @@ let
     mkModuleClass;
 
   # mkLib's signature is its pattern, with no `...`: a missing or
-  # unexpected argument is Nix's own error at the call site, naming
+  # unexpected argument is Nix's error at the call site, naming
   # mkLib and pointing here.
   mkLib =
     {
@@ -819,7 +819,7 @@ let
         # as units.  A project value is assumed to carry `libOverlays`
         # and class-keyed `modules` dictionaries, which a caisson-built
         # flake's outputs already do; the shape is assumed rather than
-        # checked (producers validate their own exports).  The
+        # checked (producers validate their exports).  The
         # project's overlays join the registered dictionary and its
         # modules join the registry under `<project>/<name>`, so the
         # existing selections keep per-item choice: libOverlayImports
@@ -857,7 +857,7 @@ let
         # Consumed projects' package overlays, under `<project>/<name>`
         # like their lib overlays. A project's entries and the entries
         # they import carry the keys of the project's registry; a key
-        # without a `/` is one of the project's own names and is keyed
+        # without a `/` is one of the project's names and is keyed
         # `<project>/<key>` here, so an import of a sibling still meets
         # the sibling, and a key with a `/` names an entry the project
         # itself took from another project and keeps it, so two
@@ -1054,7 +1054,7 @@ let
           };
         };
 
-        # caisson-core's own entries, bound to this composition.
+        # caisson-core's entries, bound to this composition.
         coreOverlays = coreEntries {
           inherit sources;
           entries = publishedEntries;
@@ -1140,7 +1140,7 @@ let
           overlay = _final: prev: contributeModules prev projectModules;
         };
 
-        # The composing flake's own registrations apply last, so a
+        # The composing flake's registrations apply last, so a
         # local name deterministically beats a same-named
         # overlay-borne contribution.
         localModulesOverlay = {
@@ -1176,7 +1176,7 @@ let
           );
 
         # The lib is built in four stages, each a new fixpoint over the
-        # seed, and each carrying its own manifest as `libManifest`, so
+        # seed, and each carrying a manifest as `libManifest`, so
         # `lib.caisson-core.libManifest` is always the record of
         # the lib being read at the stage that lib is at. Each stage
         # exists because something is a function of it.
@@ -1361,7 +1361,7 @@ let
             let
               # Refused when the attribute set is merged, not when a
               # manifest is read: an unknown name such as `libManifest`
-              # is shadowed by the stage's own binding and would never
+              # is shadowed by the stage's binding and would never
               # be read.
               unknown = builtins.filter (attr: !(builtins.elem attr phaseManifests)) (
                 builtins.attrNames given
@@ -1467,7 +1467,7 @@ let
         # entry and marked opaque, as is each keyless entry, which the
         # composition applies after the keyed ones. The walk is over
         # the selection alone: the registrations and the manifest
-        # compose after it as caisson-core's own recording, not as
+        # compose after it as caisson-core's recording, not as
         # entries.
         selectionMeta = (composeRegistered { inherit published; } importedLibOverlays).meta;
         entries =
@@ -1690,7 +1690,7 @@ in
       };
       # Seed only: overlay contributions merge in during composition,
       # and mkLib applies the local registrations as a final overlay
-      # so the composing flake's own entries win over contributed
+      # so the composing flake's entries win over contributed
       # ones.
       modules = (prev.caisson-core or { }).modules or { };
       # The class index: per class, the integration that owns it and

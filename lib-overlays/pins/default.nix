@@ -43,7 +43,7 @@
 #   pin.follows    flake readers: for an input declared as a `follows`,
 #                  the path of input names it follows from the root; its
 #                  tree and identity are those of the input it lands on,
-#                  and it has no lock entry of its own to move. Null for
+#                  and it has no lock entry to move. Null for
 #                  every other input.
 #
 # The names of a flake input's `pin` are fixed and its values lazy, as
@@ -185,7 +185,7 @@ let
         else
           flakeLock.checkVersion "pins.flake-compat" raw;
       # Every node of the lock as flake-compat makes it: a flake node is
-      # the flake, its `outputs` applied to its own inputs and itself,
+      # the flake, its `outputs` applied to its inputs and itself,
       # decorated with `inputs`, `outputs`, `sourceInfo`, `outPath` and
       # `_type`, as Nix hands a flake input over; a `flake = false` node
       # is its source tree. Nodes resolve lazily, so an input's inputs

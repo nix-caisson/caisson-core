@@ -32,7 +32,7 @@
 # directory is the class, whatever its name, and a class no composed
 # integration declares is an error as well: registering through the
 # index is what lets an integration that wraps another (declaring the
-# same class later, with its own mkModule) see every module of the
+# same class later, with its mkModule) see every module of the
 # class. A tree with another layout registers by hand.
 { ... }:
 let

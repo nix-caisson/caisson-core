@@ -6,7 +6,7 @@ builtins.
 
 caisson-core has **zero flake inputs** and its library code references
 nothing but `builtins`. It is the foundation layer of the caisson
-family; it is useful on its own to anyone who wants to compose an
+family; it is useful by itself to anyone who wants to compose an
 extensible library out of overlay-shaped pieces without depending on
 nixpkgs, flake-parts, or any other flake.
 
@@ -54,7 +54,7 @@ in
   many entries import it. The *first* occurrence of a key fixes its
   position; the *last* occurrence supplies its value, so mentioning a
   key again replaces that entry wholesale. A replacement inherits the
-  replaced entry's position: its own imports are pulled into the
+  replaced entry's position: its imports are pulled into the
   composition, but they land later, guaranteeing reachability rather
   than precedence.
 - **Cycles terminate.** The walk skips a key that is already on its
@@ -107,7 +107,7 @@ core.mkLib {
   defaultEcosystemSrc = { nixpkgs = inputs.nixpkgs; };
                           # the tree's default source per ecosystem, by
                           # exact name; `nixpkgs` supplies the nixpkgs-lib
-                          # part unless `nixpkgs-lib` names its own source
+                          # part unless `nixpkgs-lib` is declared separately
   modules = lib: { };                 # class-keyed local registrations,
                                       # given the bootstrap lib
   configs = lib: { };                 # class-keyed configurations
@@ -133,14 +133,14 @@ core.mkLib {
 ```
 
 The signature is the pattern of `mkLib`, with no `...`: a missing or
-unexpected argument is Nix's own error at the call site, naming
+unexpected argument is Nix's error at the call site, naming
 `mkLib` and pointing at the pattern, whose comments say what each
 argument is.
 
 The library is built in four stages, each a new fixpoint over the
-empty seed with its own manifest in `caisson-core.libManifest`, and
+empty seed with a manifest in `caisson-core.libManifest`, and
 each there because some argument is a function of it. The core lib
-holds caisson-core's own entries and nothing else, with the lib
+holds caisson-core's entries and nothing else, with the lib
 overlay registry grafted onto its manifest; it is the lib
 `libOverlayImports` receives, so a selection refers to entries as
 `lib.caisson-core.libManifest.libOverlays.<name>`. The bootstrap lib
@@ -190,7 +190,7 @@ Nothing is composed over. nixpkgs' library arrives as the published
 supplying that part (`defaultEcosystemSrc.nixpkgs-lib`, else
 `.nixpkgs`, else a pinned source named exactly so) as that source fixes it;
 a polyfill composed later overrides a name for readers of the
-composed library, not for upstream's own internal references, since
+composed library, not for upstream's internal references, since
 nixpkgs' `lib/default.nix` exposes no way to re-tie its fixpoint. An
 overlay that needs upstream's functions imports the
 entry from its closure (`{ entries, ... }: { imports = [ entries.nixpkgs-lib ]; ... }`);
@@ -223,7 +223,7 @@ through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
 same-named contributions.
 
-caisson-core is its own composition. `lib/default.nix` holds the one
+caisson-core composes itself. `lib/default.nix` holds the one
 primitive, `compose`, and composes the overlays under
 `lib-overlays/<name>/default.nix` (`compose`, `resolve`, `kernel`,
 `lifecycle`, `readers`, `pins`) over the empty seed into the `caisson-core`
@@ -259,7 +259,7 @@ entries alone is a filter on that field. An entry imports a sibling
 from the registry of the composition that registered it,
 `closure-lib.caisson-core.libManifest.pkgOverlays.<name>`. A
 project's entries are rekeyed as they join: a key without a `/` is
-one of the project's own names and becomes `<project>/<key>`, imports
+one of the project's names and becomes `<project>/<key>`, imports
 included, so an import still meets its sibling; a key with a `/`
 names an entry the project took from another project and is kept, so
 two projects importing the same entry import one entry. Nothing in
@@ -347,7 +347,7 @@ value carries none. Higher
 layers project a flake's `libOverlays` and `modules` outputs from it,
 and the `projects` argument consumes those projections one level
 down, which is how dictionaries populate across flakes. The manifest
-carries no checks here: producers validate their own manifests, and
+carries no checks here: producers validate their manifests, and
 consuming integrations type-check on the export side.
 
 ## The kernel
