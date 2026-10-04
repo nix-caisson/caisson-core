@@ -143,7 +143,10 @@ each there because some argument is a function of it. The core lib
 holds caisson-core's entries and nothing else, with the lib
 overlay registry grafted onto its manifest; it is the lib
 `libOverlayImports` receives, so a selection refers to entries as
-`lib.caisson-core.nixpkgs-lib.overlays.<name>`. The bootstrap lib
+`lib.caisson-core.nixpkgs-lib.overlays.<name>`. `libOverlayImports`
+replaces the default selection, every registered overlay that is not a
+published entry, and `extraLibOverlayImports`, of the same form, adds
+to the selection, whichever it is. The bootstrap lib
 adds the selection, the `nixpkgs-lib` entry and every integration
 among it; it is the lib `modules` and `configs` receive, and its
 manifest lacks `modules`, `moduleProjects`, `configs`, `pkgOverlays`

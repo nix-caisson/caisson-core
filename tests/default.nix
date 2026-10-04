@@ -421,6 +421,7 @@ let
         configs = true;
         libOverlays = true;
         libOverlayImports = true;
+        extraLibOverlayImports = true;
         pkgOverlays = true;
         pkgSets = true;
       }
@@ -2219,6 +2220,64 @@ let
         "caisson-core/pins"
       ]
       && (builtins.elemAt pinsDefiners 1).value == "replaced";
+
+    # `libOverlayImports` replaces the default selection, every
+    # registered overlay, and `extraLibOverlayImports` adds to the
+    # selection, whichever it is.
+    lifecycleExtraLibOverlayImportsAddToTheSelection =
+      let
+        marking = name: {
+          imports = [ ];
+          overlay = _final: _prev: { ${name} = true; };
+        };
+        compose =
+          selection:
+          core.mkLib (
+            {
+              sources = { };
+              libOverlays = _mkLibOverlay: {
+                one = marking "one";
+                two = marking "two";
+              };
+            }
+            // selection
+          );
+        marks = lib: {
+          one = lib.one or false;
+          two = lib.two or false;
+          added = lib.added or false;
+        };
+      in
+      marks (compose { }) == {
+        one = true;
+        two = true;
+        added = false;
+      }
+      && marks (compose {
+        libOverlayImports = lib: [ lib.caisson-core.nixpkgs-lib.overlays.one ];
+      }) == {
+        one = true;
+        two = false;
+        added = false;
+      }
+      && marks (compose {
+        extraLibOverlayImports = _lib: [ (marking "added") ];
+      }) == {
+        one = true;
+        two = true;
+        added = true;
+      }
+      && marks (compose {
+        libOverlayImports = lib: [ lib.caisson-core.nixpkgs-lib.overlays.one ];
+        extraLibOverlayImports = _lib: [ (marking "added") ];
+      }) == {
+        one = true;
+        two = false;
+        added = true;
+      }
+      && throws (compose {
+        extraLibOverlayImports = [ ];
+      });
 
     # `definers` names every layer that defines a path, the winner last,
     # with the value after each layer and its binding position when the

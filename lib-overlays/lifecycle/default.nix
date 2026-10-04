@@ -1124,8 +1124,13 @@ let
       libOverlays ? null,
       # `lib: [ <entry> ]`: which registered overlays apply to this
       # composition, given the core lib, which carries the registry as
-      # `lib.caisson-core.nixpkgs-lib.overlays.<name>`.
+      # `lib.caisson-core.nixpkgs-lib.overlays.<name>`. It replaces the
+      # default selection, every registered overlay that is not a
+      # published entry.
       libOverlayImports ? null,
+      # `lib: [ <entry> ]`: registered overlays added to that
+      # selection, whichever it is.
+      extraLibOverlayImports ? null,
       # `mkPkgOverlay: { <name> = entry; }`, usually mkPkgOverlays ./pkg-overlays:
       # the package overlays this tree registers, keyed entries whose
       # `overlay` is a nixpkgs overlay. Nothing here applies them; a
@@ -1222,6 +1227,7 @@ let
         rawLibOverlayImports = given "libOverlayImports" (
           lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays publishedNames)
         );
+        rawExtraLibOverlayImports = given "extraLibOverlayImports" (_lib: [ ]);
         rawEcosystems = given "defaultEcosystemSrc" { };
         rawProjects = given "projects" { };
         rawSystems = resolvedArgs.systems or null;
@@ -1567,6 +1573,18 @@ let
               (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
               got a ${builtins.typeOf rawLibOverlayImports}.
             '';
+        # `extraLibOverlayImports` adds to that selection, the default
+        # or the one `libOverlayImports` gives.
+        extraLibOverlayImports =
+          if builtins.isFunction rawExtraLibOverlayImports then
+            rawExtraLibOverlayImports coreLib
+          else
+            throw ''
+              mkLib expects `extraLibOverlayImports` to be a function taking the
+              core lib and returning the entries to compose beside the selection
+              (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
+              got a ${builtins.typeOf rawExtraLibOverlayImports}.
+            '';
         importedLibOverlays =
           builtins.map (name: registeredLibOverlays.${name}) coreNames
           ++ (
@@ -1576,6 +1594,15 @@ let
               throw ''
                 mkLib expects `libOverlayImports` to return a list of registered
                 entries, but it returned a ${builtins.typeOf libOverlayImports}.
+              ''
+          )
+          ++ (
+            if builtins.isList extraLibOverlayImports then
+              extraLibOverlayImports
+            else
+              throw ''
+                mkLib expects `extraLibOverlayImports` to return a list of registered
+                entries, but it returned a ${builtins.typeOf extraLibOverlayImports}.
               ''
           );
 
@@ -2125,6 +2152,7 @@ let
         (builtins.isFunction rawConfigs || configs)
         (builtins.isFunction rawLibOverlays || libOverlays)
         (builtins.isFunction rawLibOverlayImports || libOverlayImports)
+        (builtins.isFunction rawExtraLibOverlayImports || extraLibOverlayImports)
         (builtins.isFunction rawPkgOverlays || localPkgOverlays)
         (builtins.isFunction rawPkgSets || pkgSets)
         (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
