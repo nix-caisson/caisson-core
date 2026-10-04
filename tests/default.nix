@@ -167,7 +167,7 @@ let
   # project's default entry through the consumer's registry.
   pkgOverlayProducer = core.mkLib {
     sources = { };
-    pkgOverlays = core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
+    pkgOverlays = lib: lib.caisson-core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
   };
   pkgOverlayConsumer = core.mkLib {
     sources = { };
@@ -704,7 +704,7 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          modules = core.mkModules ./fixtures/modules-dir;
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
           libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
         };
         registry = composed.caisson-core.modules;
@@ -726,7 +726,7 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          configs = core.mkModules ./fixtures/modules-dir;
+          configs = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
           libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
         };
       in
@@ -754,7 +754,7 @@ let
           };
         composed = core.mkLib {
           sources = { };
-          modules = core.mkModules ./fixtures/modules-dir;
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
           libOverlays = lib: {
             classes = lib.caisson-core.mkLibOverlay declaringClasses;
             wrapper = lib.caisson-core.mkLibOverlay wrapping;
@@ -774,26 +774,35 @@ let
       throws
         (core.mkLib {
           sources = { };
-          modules = core.mkModules ./fixtures/modules-dir;
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
         }).caisson-core.modules.flake;
 
-    readersMkModulesRefusesAStrayFile = throws (
-      (core.mkModules ./fixtures/modules-dir-stray) {
-        caisson-core.classes.flake.mkModule = path: path;
-      }
-    );
+    # The refusals are read from a library that declares the class of
+    # the fixture, so what throws is the directory and not the class.
+    readersMkModulesRefusesAStrayFile =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
+        };
+      in
+      builtins.isAttrs (composed.caisson-core.mkModules ./fixtures/modules-dir)
+      && throws (composed.caisson-core.mkModules ./fixtures/modules-dir-stray);
 
-    readersMkModulesRefusesAnEntryWithoutDefault = throws (
-      (core.mkModules ./fixtures/modules-dir-empty-entry) {
-        caisson-core.classes.flake.mkModule = path: path;
-      }
-    );
+    readersMkModulesRefusesAnEntryWithoutDefault =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
+        };
+      in
+      throws (composed.caisson-core.mkModules ./fixtures/modules-dir-empty-entry);
 
     readersMkLibOverlaysReadsEntries =
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = core.mkLibOverlays ./fixtures/lib-overlays-dir;
+          libOverlays = lib: lib.caisson-core.mkLibOverlays ./fixtures/lib-overlays-dir;
         };
       in
       composed.fromDefault
@@ -807,7 +816,7 @@ let
         ];
 
     readersMkLibOverlaysRefusesAStrayFile = throws (
-      (core.mkLibOverlays ./fixtures/lib-overlays-dir-stray) { caisson-core.mkLibOverlay = path: path; }
+      core.mkLibOverlays ./fixtures/lib-overlays-dir-stray
     );
 
     # Package overlays: registered in mkLib beside libOverlays, keyed by
@@ -852,7 +861,7 @@ let
       && applied.base == "extra+base";
 
     readersMkPkgOverlaysRefusesAStrayFile = throws (
-      (core.mkPkgOverlays ./fixtures/lib-overlays-dir-stray) { caisson-core.mkPkgOverlay = path: path; }
+      core.mkPkgOverlays ./fixtures/lib-overlays-dir-stray
     );
 
     # A consumed project's entries join under `<project>/<name>`, their
@@ -2220,6 +2229,33 @@ let
         "caisson-core/pins"
       ]
       && (builtins.elemAt pinsDefiners 1).value == "replaced";
+
+    # A registry function takes its reader from the library it is
+    # handed, so a composition that registers another
+    # `caisson-core/readers` entry reads its directories with that
+    # entry.
+    lifecycleReadersComeFromTheLibraryHandedIn =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = lib: {
+            "caisson-core/readers" = lib.caisson-core.mkLibOverlay (
+              { ... }:
+              {
+                overlay = _final: prev: {
+                  caisson-core = prev.caisson-core // {
+                    mkModules = dir: { generic.readBy = "the replacement, at ${baseNameOf dir}"; };
+                  };
+                };
+              }
+            );
+          };
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
+        };
+      in
+      composed.caisson-core.modules.generic == {
+        readBy = "the replacement, at modules-dir";
+      };
 
     # `libOverlayImports` replaces the default selection, every
     # registered overlay, and `extraLibOverlayImports` adds to the

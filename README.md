@@ -176,10 +176,15 @@ A tree laid out as `modules/<class>/<name>/default.nix`,
 `configs/<class>/<name>/default.nix`,
 `lib-overlays/<name>/default.nix` and
 `pkg-overlays/<name>/default.nix` derives the registrations
-from its directories: `modules = core.mkModules ./modules;`,
-`configs = core.mkModules ./configs;`,
-`libOverlays = core.mkLibOverlays ./lib-overlays;` and
-`pkgOverlays = core.mkPkgOverlays ./pkg-overlays;`. The first level of a
+from its directories, with the readers of the lib each registry
+function is handed:
+`modules = lib: lib.caisson-core.mkModules ./modules;`,
+`configs = lib: lib.caisson-core.mkModules ./configs;`,
+`libOverlays = lib: lib.caisson-core.mkLibOverlays ./lib-overlays;` and
+`pkgOverlays = lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays;`.
+A reader belongs to the lib it is read from, so a composition that
+registers another `caisson-core/readers` entry reads its directories
+with that entry. The first level of a
 modules directory is the class, whatever its name, and each entry
 registers through the class index of the composed library,
 `caisson-core.classes.<class>`: the `mkModule` of the integration that
