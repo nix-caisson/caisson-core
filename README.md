@@ -206,7 +206,7 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
-`definers`, `finalizeChild`, `mkEvaluation`, `finalizeTop`, the lib
+`definers`, `finalizeChild`, `mkConfiguration`, `finalizeTop`, the lib
 overlay registry view
 `nixpkgs-lib.overlays` (the manifest's `libOverlays`, which a
 `libOverlayImports` selection refers into),
@@ -342,15 +342,17 @@ the package config was declared under (the registered lib, for a
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
 lib carries `withManifests` too, keeping what is already filled in.
 
-A module evaluation is built by `caisson-core.mkEvaluation { type;
-evaluate; record ? { }; }`, which returns a configuration, the function
-of `{ name, parent }` above. `type` is the name of the integration.
+`caisson-core.mkConfiguration { type; evaluate; record ? { }; }` returns
+the configuration of a module evaluation, the function of
+`{ name, parent }` above. Nothing is evaluated until the manifest that
+function returns has its `value`, `outputs` or `children` read.
+`type` is the name of the integration.
 `evaluate` performs the evaluator's call: it takes `{ lib, manifest }`,
 the lib the evaluation runs on and the manifest being built, and
 returns `value`, `outputs` and `children`, the finalized configurations
 declared beneath by integration and then name. `record` is plain data
 the integration adds to the manifest, and it may not name a field
-`mkEvaluation` writes. The evaluation has two views, each a manifest
+`mkConfiguration` writes. The evaluation has two views, each a manifest
 whose lib is the declaring lib rebuilt with that manifest as
 `evalManifest`. The childless view (`childless = true`, no `children`)
 is the evaluation without the configurations declared beneath it. The

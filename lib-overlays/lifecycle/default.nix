@@ -536,9 +536,9 @@ let
     systems = null;
   };
 
-  # The fields `mkEvaluation` writes, which an integration's `record`
+  # The fields `mkConfiguration` writes, which an integration's `record`
   # may not name.
-  evaluationFields = [
+  configurationFields = [
     "_type"
     "ancestors"
     "childless"
@@ -578,7 +578,7 @@ let
   # alone. Nothing forces the childless evaluation until a child, or a
   # reader of `childlessManifest`, reads its value, so a configuration
   # with no children is evaluated once.
-  mkEvaluationFor =
+  mkConfigurationFor =
     final:
     {
       type,
@@ -587,7 +587,7 @@ let
     }:
     { name, parent }:
     let
-      owned = builtins.filter (field: record ? ${field}) evaluationFields;
+      owned = builtins.filter (field: record ? ${field}) configurationFields;
       base =
         builtins.intersectAttrs inheritedFields parent
         // (
@@ -595,8 +595,8 @@ let
             record
           else
             throw ''
-              caisson-core.mkEvaluation: the `${type}` integration's `record` names
-              `${builtins.head owned}`, a field mkEvaluation writes.
+              caisson-core.mkConfiguration: the `${type}` integration's `record` names
+              `${builtins.head owned}`, a field mkConfiguration writes.
             ''
         )
         // {
@@ -1815,7 +1815,7 @@ in
         mkNixpkgsLibEntry
         pkgOverlaysFor
         ;
-      mkEvaluation = mkEvaluationFor final;
+      mkConfiguration = mkConfigurationFor final;
       finalizeTop = finalizeTopFor final;
       mkPkgOverlay = mkPkgOverlayFor {
         sources = closure-inputs;

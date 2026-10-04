@@ -30,7 +30,7 @@ let
   # childless manifest.
   stubIntegration =
     type: lib: module:
-    lib.caisson-core.mkEvaluation {
+    lib.caisson-core.mkConfiguration {
       inherit type;
       evaluate =
         { lib, manifest }:
@@ -1509,7 +1509,7 @@ let
       && throws (fill [ ]).pkgsManifest
       && (fill { pkgsManifest = null; }).pkgsManifest == null;
 
-    # `mkEvaluation` builds a module evaluation's manifest from the
+    # `mkConfiguration` builds a module evaluation's manifest from the
     # `evaluate` of an integration. The stub integration here evaluates
     # a function of the lib, and finalizes the configurations it
     # returns under `children` against the childless manifest, as the
@@ -1652,10 +1652,10 @@ let
       && parent.children.stub.quiet.parent.childless
       && throws parent.children.stub.reader.outputs.marker;
 
-    # What `mkEvaluation` returns is a configuration, a function of
+    # What `mkConfiguration` returns is a configuration, a function of
     # exactly `{ name, parent }`, so a parent finalizes it as it
     # finalizes any other. The `record` of an integration is carried on
-    # both views and may not name a field mkEvaluation writes. A top is
+    # both views and may not name a field mkConfiguration writes. A top is
     # finalized only under a lib that carries a manifest.
     lifecycleEvaluationIsAConfiguration =
       let
@@ -1665,7 +1665,7 @@ let
         };
         configuration =
           record:
-          composed.caisson-core.mkEvaluation {
+          composed.caisson-core.mkConfiguration {
             type = "stub";
             evaluate = _: { value = { }; };
             inherit record;
