@@ -67,7 +67,7 @@ in
   be replaced by another entry.
 - **Application is a classic overlay fold.** `prev` is everything
   accumulated so far; references through `final` see the finished
-  fixpoint. One law follows from the fixpoint itself: an overlay's
+  fixpoint. A law follows from the fixpoint itself: an overlay's
   output attribute *names* must not depend on `final`.
 - `compose` also returns `meta` (key order, winning entries, tail
   length) so tooling can inspect and lint a composition; `compose`
@@ -137,7 +137,7 @@ unexpected argument is Nix's error at the call site, naming
 `mkLib` and pointing at the pattern, whose comments say what each
 argument is.
 
-The library is built in four stages, each a new fixpoint over the
+The library is built in stages, each a new fixpoint over the
 empty seed with a manifest in `caisson-core.libManifest`, and
 each there because some argument is a function of it. The core lib
 holds caisson-core's entries and nothing else, with the lib
@@ -164,7 +164,7 @@ the original.
 A tree laid out as `modules/<class>/<name>/default.nix`,
 `configs/<class>/<name>/default.nix`,
 `lib-overlays/<name>/default.nix` and
-`pkg-overlays/<name>/default.nix` derives the four registrations
+`pkg-overlays/<name>/default.nix` derives the registrations
 from its directories: `modules = core.mkModules ./modules;`,
 `configs = core.mkModules ./configs;`,
 `libOverlays = core.mkLibOverlays ./lib-overlays;` and
@@ -180,7 +180,7 @@ wrapping another takes over the class, and caisson-core declares the
 class-free `generic` class itself. A directory for a class no
 composed integration declares is an error. `mkLibOverlays` applies
 `mkLibOverlay` to each entry, and `mkPkgOverlays` `mkPkgOverlay`. An entry is a directory holding a
-`default.nix`, a symlink to one included; anything else in a
+`default.nix`, a symlink to such a directory included; anything else in a
 directory being read is an error, so a stray file cannot silently
 vanish from a registry. A tree with another layout writes the
 registrations by hand.
@@ -204,7 +204,7 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized),
 `mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
-registry, the class index `classes`, the three phase manifests
+registry, the class index `classes`, the phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
 `definers`, `finalizeChild`, `mkConfiguration`, `finalizeTop`, the lib
 overlay registry view
@@ -226,7 +226,7 @@ through their closure (`mkModule`, `contributeModules`); the
 composing flake's local registrations apply last and win over
 same-named contributions.
 
-caisson-core composes itself. `lib/default.nix` holds the one
+caisson-core composes itself. `lib/default.nix` holds the
 primitive, `compose`, and composes the overlays under
 `lib-overlays/<name>/default.nix` (`compose`, `resolve`, `kernel`,
 `lifecycle`, `readers`, `pins`) over the empty seed into the `caisson-core`
@@ -245,7 +245,7 @@ choice and a local registration wins a name collision. Each registry
 records where an entry came from, so an export selector can keep the
 entries the composition registered itself: a lib overlay entry carries
 `project` (null for a local registration, the project's name for a
-contributed one, `caisson-core` for the entries caisson-core publishes
+contributed entry, `caisson-core` for the entries caisson-core publishes
 into every composition), and the manifest's `moduleProjects.<class>.<name>`
 holds the same for modules, beside the module dictionary, since a
 module value cannot carry a field without becoming a different module.
@@ -255,9 +255,9 @@ overlay entry's shape: a file handed to `mkPkgOverlay` takes the
 closure `{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and
 returns `{ imports ? [ ], overlay }`, where `overlay` is a nixpkgs
 overlay. Every registered entry carries its registry name as `key`,
-the file it was read from as `origin` (null for one built from a
+the file it was read from as `origin` (null for an entry built from a
 function), and `project`, null for a local registration and the
-project's name for a contributed one, so a selection of the local
+project's name for a contributed entry, so a selection of the local
 entries alone is a filter on that field. An entry imports a sibling
 from the registry of the composition that registered it,
 `closure-lib.caisson-core.libManifest.pkgOverlays.<name>`. A
@@ -315,12 +315,12 @@ entry it composes that the core stage did not, in composition order:
 the selection, and a registration replacing a caisson-core entry,
 which so comes after the entry it replaces. The registered stage adds
 the `modules`, `configs` and `pkgOverlays` registrations, and the full
-stage the `pkgSets` ones.
+stage the `pkgSets` registrations.
 Each event has `manifest` (the name path, empty for the root lib),
 `type`, `operation` (`registry` or `layer`), `key`, `index` (its
 position within its operation) and `origin` (`project`, and `file`
-where the entry was built from one; a lib overlay built from a file
-records it as `origin`). A layer event also carries, lazily, the two
+where the entry was built from a file; a lib overlay built from a file
+records it as `origin`). A layer event also carries, lazily, the
 sides of its overlay call `final: prev: result`, as the stage that
 recorded it composed them: `result`, the attrset its overlay
 returned, and `prev`, the accumulation it received.
@@ -335,10 +335,11 @@ to fill in on the libraries they hand out. Every stage `mkLib` builds
 carries `caisson-core.withManifests { pkgsManifest = manifest; }`,
 which rebuilds that stage from its declaration with the given phase
 manifests filled in: the same entries and `libManifest`, composed as a
-new fixpoint, so everything that reads one through the fixpoint sees
-it. It is how the nixpkgs integration hands out `pkgs.lib`, the lib
-the package config was declared under (the registered lib, for a
-`pkgSets` entry) with `pkgsManifest` filled in. Only `pkgsManifest` and
+new fixpoint, so everything that reads a phase manifest through the
+fixpoint sees it. It is how the nixpkgs integration hands out
+`pkgs.lib`, the lib the package config was declared under (the
+registered lib, for a `pkgSets` entry) with `pkgsManifest` filled in.
+Only `pkgsManifest` and
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
 lib carries `withManifests` too, keeping what is already filled in.
 
@@ -352,11 +353,12 @@ the lib the evaluation runs on and the manifest being built, and
 returns `value`, `outputs` and `children`, the finalized configurations
 declared beneath by integration and then name. `record` is plain data
 the integration adds to the manifest, and it may not name a field
-`mkConfiguration` writes. The evaluation has two views, each a manifest
-whose lib is the declaring lib rebuilt with that manifest as
-`evalManifest`. The childless view (`childless = true`, no `children`)
-is the evaluation without the configurations declared beneath it. The
-full view is the manifest returned; it carries the childless one as
+`mkConfiguration` writes. The evaluation has a childless view and a
+full view, each a manifest whose lib is the declaring lib rebuilt
+with that manifest as `evalManifest`. The childless view
+(`childless = true`, no `children`) is the evaluation without the
+configurations declared beneath it. The
+full view is the manifest returned; it carries the childless manifest as
 `childlessManifest`, and an integration finalizes each child against
 that (`finalizeChild { inherit name; parent =
 manifest.childlessManifest; }`), so a child's `parent` is the
@@ -375,12 +377,12 @@ declares on `mkLib`, absent when it declares none, and its parent is
 the lib's manifest.
 
 Every manifest carries
-`_type = "caisson-manifest"`, and `manifestOf` finds one in whatever
+`_type = "caisson-manifest"`, and `manifestOf` finds it in whatever
 a file returns: a manifest, an attrset carrying `caisson.manifest`,
 an evaluated configuration carrying `config.caisson.manifest`, or a
 library (or a package set, through `pkgs.lib`) carrying the phase
-manifests, where the last one filled in is the manifest. It returns null when the
-value carries none. Higher
+manifests, where the last manifest filled in is the manifest. It
+returns null when the value carries none. Higher
 layers project a flake's `libOverlays` and `modules` outputs from it,
 and the `projects` argument consumes those projections one level
 down, which is how dictionaries populate across flakes. The manifest
@@ -429,7 +431,7 @@ inside a flake's `outputs` asking which attributes `self` has forces
 the outputs being computed. A flake reads it from `self`; a flakeless
 top in a git working tree reads it with `caisson-core.pins.gitRoot ./.`
 (under an impure evaluation, since the working tree is not locked),
-which gives the revision of a clean tree and marks a dirty one.
+which gives the revision of a clean tree and marks a dirty tree.
 
 A flake input declared as a `follows` is the tree it lands on, with
 `pin.follows` naming the input path it follows. When an

@@ -145,7 +145,7 @@ let
       descriptors =
         if lock == null then { } else flakeLock.descriptors (flakeLock.checkVersion "pins.flake" lock);
       # An input handed over as a bare path or store-path string, as a
-      # hand-wired flake or `callConsumerFlake`'s pool may pass one, is
+      # hand-wired flake or `callConsumerFlake`'s pool may pass it, is
       # a tree with that out path.
       sourceOf =
         name: raw:

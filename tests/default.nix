@@ -1053,8 +1053,8 @@ let
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
 
-    # The three phase manifests are present on every composed library;
-    # mkLib fills in the lib one and leaves the other two null.
+    # The phase manifests are present on every composed library;
+    # mkLib fills in the lib manifest and leaves the others null.
     lifecyclePhaseManifestsArePresentAndNullUntilFilledIn =
       let
         composed = core.mkLib {
@@ -1132,7 +1132,7 @@ let
         }
       );
 
-    # The project's name is declared once on mkLib and recorded as
+    # The project's name is declared on mkLib and recorded as
     # `name` in the root lib manifest.
     lifecycleNameIsDeclaredOnMkLib =
       let
@@ -1153,7 +1153,7 @@ let
 
     # `entries` lists the selection's keys in composition order:
     # caisson-core's forced entries first, then the selected entries
-    # with each one's imports before it. A key that names no registry
+    # with each entry's imports before it. A key that names no registry
     # entry is opaque.
     lifecycleManifestEntriesFollowCompositionOrder =
       let
@@ -1458,7 +1458,7 @@ let
     # `withManifests` rebuilds a stage from its declaration with phase
     # manifests filled in: the same entries and `libManifest`, a new
     # fixpoint, so an overlay reading `pkgsManifest` through `final`
-    # sees it, and `manifestOf` finds it as the last one filled in.
+    # sees it, and `manifestOf` finds it as the last manifest filled in.
     # Further calls keep what is already filled in.
     lifecycleWithManifestsRebuildsTheStage =
       let
@@ -1518,7 +1518,7 @@ let
     # The top takes the name the composition declares, and its parent
     # is the manifest of the lib. Each view runs on a lib whose
     # `evalManifest` is that view's manifest, and whose `libManifest`
-    # and registries are the ones the composition built.
+    # and registries are those the composition built.
     lifecycleEvaluationHasAChildlessAndAFullView =
       let
         composed = core.mkLib {
@@ -1564,8 +1564,8 @@ let
     # A child is finalized against the childless view of its parent:
     # its `parent` and its `nearest.<integration>` are that manifest,
     # the chain grows by one manifest per level, and the nearest
-    # ancestor of an integration is replaced by a nearer one of the
-    # same integration and kept beneath one of another.
+    # ancestor of an integration is replaced by a nearer ancestor of
+    # the same integration and kept beneath an ancestor of another.
     lifecycleChildrenAreFinalizedAgainstTheChildlessView =
       let
         composed = core.mkLib {
@@ -1622,9 +1622,9 @@ let
 
     # The childless evaluation runs only when something reads it. An
     # evaluator that fails in the childless view is harmless to a
-    # configuration with no children, and to one whose children read
-    # nothing of the value of their parent; a child that reads that
-    # value forces it.
+    # configuration with no children, and to a configuration whose
+    # children read nothing of the value of their parent; a child that
+    # reads that value forces it.
     lifecycleChildlessViewIsEvaluatedOnDemand =
       let
         composed = core.mkLib { sources = { }; };
@@ -1928,7 +1928,7 @@ let
       && composed.caisson-core.modules.nixos."dep/service".config.origin == "dep"
       && builtins.attrNames composed.caisson-core.libManifest.projects == [ "dep" ]
       # The manifest dictionaries carry the registered union, so the
-      # export side sees project entries like hand-registered ones.
+      # export side sees project entries like hand-registered entries.
       &&
         builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
         ++ [
@@ -1995,7 +1995,7 @@ let
       && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "local";
 
     # Every registered lib overlay records where it came from: null for a
-    # local registration, the project's name for a contributed one, and
+    # local registration, the project's name for a contributed entry, and
     # `caisson-core` for the entries caisson-core publishes itself. The
     # filter on `project == null` is the local view an export selector
     # keeps.
@@ -2069,7 +2069,7 @@ let
     );
 
     # caisson-core composes itself: the entries that make the
-    # top-level value are the ones mkLib composes into a consumer, so
+    # top-level value are those mkLib composes into a consumer, so
     # a composition assembled with `compose` directly takes them as
     # keyed entries.
     lifecycleCoreEntriesComposeDirectly =
@@ -2322,7 +2322,7 @@ let
       && s.alias.outPath == s.local.outPath
       && s.alias.pin.follows == [ "local" ];
 
-    # A flake input comes with its outputs, as Nix hands one over, so a
+    # A flake input comes with its outputs, as Nix hands it over, so a
     # partition's `extraInputs` can read `inputs.<name>.flakeModule`.
     pinsFlakeCompatFlakeInputCarriesOutputs =
       let

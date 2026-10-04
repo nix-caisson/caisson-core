@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 #
 # The flake lock file, read as data: what each of a flake's inputs is
-# locked to, following `follows` the way Nix and flake-compat do. Both
+# locked to, following `follows` the way Nix and flake-compat do. The
 # flake pin readers use it: `pins.flake` for the refs and locked
 # hashes the lock records (the trees themselves come from Nix), and
 # `pins.flake-compat` for everything, fetching what it describes.
@@ -82,9 +82,9 @@ let
     ) (rootNode.inputs or { });
 
   # A flake reference rendered as a string, from the `original` attrs
-  # of a lock node. Uses the evaluator's renderer where it has one (it
-  # needs the flakes feature); otherwise renders the common forms the
-  # same way.
+  # of a lock node. Uses the evaluator's renderer where the evaluator
+  # has a renderer (it needs the flakes feature); otherwise renders the
+  # common forms the same way.
   refToString =
     ref: if builtins ? flakeRefToString then builtins.flakeRefToString ref else renderRef ref;
 
