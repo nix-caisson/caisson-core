@@ -206,7 +206,8 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
-`definers`, `finalizeChild`, `mkConfiguration`, `finalizeTop`, the lib
+`definers`, `finalizeChild`, `mkConfiguration`, `finalizeTop`, `elide`,
+the lib
 overlay registry view
 `nixpkgs-lib.overlays` (the manifest's `libOverlays`, which a
 `libOverlayImports` selection refers into),
@@ -343,7 +344,8 @@ Only `pkgsManifest` and
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
 lib carries `withManifests` too, keeping what is already filled in.
 
-`caisson-core.mkConfiguration { type; evaluate; record ? { }; }` returns
+`caisson-core.mkConfiguration { type; evaluate; record ? { };
+perSystem ? false; }` returns
 the configuration of a module evaluation, the function of
 `{ name, parent }` above. Nothing is evaluated until the manifest that
 function returns has its `value`, `outputs` or `children` read.
@@ -375,6 +377,42 @@ registries. `caisson-core.finalizeTop configuration` finalizes the
 configuration a top ends with: its name is the name the composition
 declares on `mkLib`, absent when it declares none, and its parent is
 the lib's manifest.
+
+An integration that evaluates a configuration at a system passes
+`perSystem = true`. A declared configuration is then an evaluation for
+every system in force where it is declared, and the configuration
+returns those evaluations by system: as many as there are systems in
+force, also when that is a single system, and none when no system is
+in force; nothing is refused. In the tree the system sits above the
+name. Each evaluation is a manifest as described above, with the
+childless and full views, under the name it is declared by, carrying
+its system as `system`; its parent is the system, a manifest of type
+`system` named by the system, beneath the parent that declares the
+configuration. The parent's full manifest holds each system under
+`children.system`, with the evaluations declared at it by integration
+and then name, beside the configurations evaluated once for every
+system, which stay under `children.<integration>`. An evaluation sees
+the system above it without what is declared under it. The systems in
+force carry on beneath an evaluation, so a configuration declared
+beneath it has a system above it in turn. `finalizeChild` accepts
+either result, a manifest or the evaluations by system.
+
+`caisson-core.elide paths` gives, for each of a set of things in a
+tree, the segments needed to tell it apart from the others. A path is
+the list of `{ type, name }` segments from the top down to the thing,
+ending in the name of the thing; a system is a segment of type
+`system`. The result has, for each path in order, the segments kept,
+as strings. The rule keeps the last segment of every path, and beyond
+it only the segments where paths that end in the same name fork: among
+those paths it drops the prefix they share, keeps the segment at which
+they first differ, and does the same within each branch. So a name
+that is alone stays bare, whatever sits above it, and names that
+collide gain what tells them apart: `hostname1` at a single system
+stays `hostname1`, and `hostname2` at `x86_64-linux` and
+`aarch64-linux` keeps the system. A segment is kept as its name, or as
+`type/name` where the branches of that fork hold the same name under
+several types. How the kept segments are written out as a name, and a
+clash between equal paths, are for whoever publishes them.
 
 Every manifest carries
 `_type = "caisson-manifest"`, and `manifestOf` finds it in whatever

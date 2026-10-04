@@ -28,33 +28,45 @@ let
   # runs on, and it finalizes the configurations the module returns
   # under `children`, by integration and then name, against the
   # childless manifest.
-  stubIntegration =
-    type: lib: module:
-    lib.caisson-core.mkConfiguration {
-      inherit type;
-      evaluate =
-        { lib, manifest }:
-        let
-          config = module lib;
-        in
-        {
-          value = {
-            inherit config;
-            seenLib = lib;
-          };
-          outputs.marker = config.marker or null;
-          children = builtins.mapAttrs (
-            integration:
-            builtins.mapAttrs (
-              name:
-              lib.caisson-core.finalizeChild {
-                inherit name;
-                parent = manifest.childlessManifest;
-                what = "`children.${integration}.${name}`";
-              }
-            )
-          ) (config.children or { });
-        };
+  stubIntegration = stubIntegrationWith { };
+
+  # The same constructor for an integration that evaluates a
+  # configuration at a system.
+  perSystemStubIntegration = stubIntegrationWith { perSystem = true; };
+
+  stubIntegrationWith =
+    declaration: type: lib: module:
+    lib.caisson-core.mkConfiguration (
+      declaration
+      // {
+        inherit type;
+        evaluate = stubEvaluate module;
+      }
+    );
+
+  stubEvaluate =
+    module:
+    { lib, manifest }:
+    let
+      config = module lib;
+    in
+    {
+      value = {
+        inherit config;
+        seenLib = lib;
+      };
+      outputs.marker = config.marker or null;
+      children = builtins.mapAttrs (
+        integration:
+        builtins.mapAttrs (
+          name:
+          lib.caisson-core.finalizeChild {
+            inherit name;
+            parent = manifest.childlessManifest;
+            what = "`children.${integration}.${name}`";
+          }
+        )
+      ) (config.children or { });
     };
 
   # The pin readers' pure parts, read directly.
@@ -1651,6 +1663,361 @@ let
       && parent.children.stub.quiet.outputs.marker == "quiet"
       && parent.children.stub.quiet.parent.childless
       && throws parent.children.stub.reader.outputs.marker;
+
+    # An integration that evaluates a configuration at a system
+    # declares `perSystem`. A declared configuration is then an
+    # evaluation for every system in force where it is declared, and
+    # finalizing it gives those evaluations by system: as many as
+    # there are systems, also for a single system. Each evaluation
+    # carries the name it is declared under and its system, and its
+    # parent is the system, which sits beneath the parent that
+    # declares the configuration. The systems in force carry on
+    # beneath an evaluation.
+    lifecyclePerSystemConfigurationIsAnEvaluationPerSystem =
+      let
+        composedWith =
+          systems:
+          core.mkLib {
+            sources = { };
+            name = "probe-project";
+            inherit systems;
+          };
+        evaluationsOn =
+          composed:
+          composed.caisson-core.finalizeTop (
+            perSystemStubIntegration "machine" composed (lib: {
+              marker = "at ${lib.caisson-core.evalManifest.system}";
+            })
+          );
+        both = [
+          "x86_64-linux"
+          "aarch64-linux"
+        ];
+        several = evaluationsOn (composedWith both);
+        single = evaluationsOn (composedWith [ "x86_64-linux" ]);
+        x86 = several.x86_64-linux;
+      in
+      builtins.attrNames several == [
+        "aarch64-linux"
+        "x86_64-linux"
+      ]
+      && x86._type == "caisson-manifest"
+      && x86.type == "machine"
+      && x86.name == "probe-project"
+      && x86.system == "x86_64-linux"
+      && x86.systems == both
+      && x86.parent.type == "system"
+      && x86.parent.name == "x86_64-linux"
+      && x86.parent.childless
+      && x86.parent.children == { }
+      && x86.parent.parent.type == "lib"
+      && builtins.map (ancestor: ancestor.type) x86.ancestors == [
+        "lib"
+        "system"
+      ]
+      && x86.outputs.marker == "at x86_64-linux"
+      && several.aarch64-linux.outputs.marker == "at aarch64-linux"
+      && x86.value.seenLib.caisson-core.evalManifest.system == "x86_64-linux"
+      && x86.childlessManifest.childless
+      && x86.childlessManifest.system == "x86_64-linux"
+      && builtins.attrNames single == [ "x86_64-linux" ]
+      && single.x86_64-linux.outputs.marker == "at x86_64-linux";
+
+    # No system in force is no evaluation: a configuration declared in
+    # a composition that declares no systems, or an empty list,
+    # finalizes to no evaluations, and nothing is refused.
+    lifecyclePerSystemConfigurationWithNoSystemHasNoEvaluation =
+      let
+        evaluationsOn =
+          composed:
+          composed.caisson-core.finalizeTop (
+            perSystemStubIntegration "machine" composed (_lib: throw "evaluated with no system")
+          );
+      in
+      evaluationsOn (core.mkLib { sources = { }; }) == { }
+      &&
+        evaluationsOn (
+          core.mkLib {
+            sources = { };
+            systems = [ ];
+          }
+        ) == { };
+
+    # The parent that declares configurations holds, in its full
+    # manifest, each system under `children.system` with the
+    # evaluations declared at it, by integration and then name, beside
+    # the configurations evaluated once for every system. An
+    # evaluation sees the system above it without what is declared
+    # under it. A configuration declared beneath an evaluation has a
+    # system above it in turn, so a system appears on a path as often
+    # as a per-system configuration does.
+    lifecycleParentHoldsEvaluationsUnderTheirSystem =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [
+            "x86_64-linux"
+            "aarch64-linux"
+          ];
+        };
+        machine =
+          lib: marker: children:
+          perSystemStubIntegration "machine" lib (lib: {
+            marker = "${marker} at ${lib.caisson-core.evalManifest.system}";
+            children = children lib;
+          });
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "holder" composed (lib: {
+            marker = "holder";
+            children.machine.alpha = machine lib "alpha" (lib: {
+              machine.image = machine lib "image on ${lib.caisson-core.evalManifest.system}" (_lib: { });
+            });
+            children.machine.beta = machine lib "beta" (_lib: { });
+            children.stub.plain = stubIntegration "stub" lib (_lib: {
+              marker = "plain";
+            });
+          })
+        );
+        x86 = top.children.system.x86_64-linux;
+        alpha = x86.children.machine.alpha;
+        image = alpha.children.system.aarch64-linux.children.machine.image;
+      in
+      builtins.attrNames top.children == [
+        "stub"
+        "system"
+      ]
+      && builtins.attrNames top.children.system == [
+        "aarch64-linux"
+        "x86_64-linux"
+      ]
+      && top.children.stub.plain.outputs.marker == "plain"
+      && x86.type == "system"
+      && x86.name == "x86_64-linux"
+      && !x86.childless
+      && x86.parent.childless
+      && x86.parent.type == "holder"
+      && builtins.attrNames x86.children == [ "machine" ]
+      && builtins.attrNames x86.children.machine == [
+        "alpha"
+        "beta"
+      ]
+      && alpha.name == "alpha"
+      && alpha.outputs.marker == "alpha at x86_64-linux"
+      && alpha.parent.type == "system"
+      && alpha.parent.children == { }
+      && alpha.nearest.holder.childless
+      && x86.children.machine.beta.outputs.marker == "beta at x86_64-linux"
+      && builtins.attrNames alpha.children.system == [
+        "aarch64-linux"
+        "x86_64-linux"
+      ]
+      && image.outputs.marker == "image on x86_64-linux at aarch64-linux"
+      && image.nearest.machine.system == "x86_64-linux"
+      && builtins.map (ancestor: "${ancestor.type}:${ancestor.name}") image.ancestors == [
+        "lib:probe-project"
+        "holder:probe-project"
+        "system:x86_64-linux"
+        "machine:alpha"
+        "system:aarch64-linux"
+      ];
+
+    # `elide` keeps, of each path, its last segment and the segments
+    # where paths that end in the same name fork. A name that is alone
+    # stays bare whatever sits above it, so a system above a
+    # configuration with a single system in force drops out, and the
+    # same name at several systems keeps the system.
+    elideKeepsTheNameAndTheForks =
+      let
+        segment = type: name: { inherit type name; };
+        system = segment "system";
+        nixos = segment "nixos";
+        home = segment "home-manager";
+        structural = segment "structural";
+      in
+      core.elide [ ] == [ ]
+      && core.elide [
+        [
+          (system "x86_64-linux")
+          (nixos "hostname1")
+        ]
+        [
+          (system "x86_64-linux")
+          (nixos "hostname2")
+        ]
+        [
+          (system "aarch64-linux")
+          (nixos "hostname2")
+        ]
+      ] == [
+        [ "hostname1" ]
+        [
+          "x86_64-linux"
+          "hostname2"
+        ]
+        [
+          "aarch64-linux"
+          "hostname2"
+        ]
+      ]
+      # A shared prefix and a segment on which no paths diverge never
+      # appear.
+      && core.elide [
+        [
+          (nixos "hostname2")
+          (system "x86_64-linux")
+          (structural "sub")
+          (home "user")
+        ]
+        [
+          (nixos "hostname2")
+          (system "aarch64-linux")
+          (structural "sub")
+          (home "user")
+        ]
+      ] == [
+        [
+          "x86_64-linux"
+          "user"
+        ]
+        [
+          "aarch64-linux"
+          "user"
+        ]
+      ]
+      # Names that do not collide gain nothing, though their paths
+      # differ.
+      && core.elide [
+        [
+          (structural "top")
+          (structural "a")
+          (nixos "laptop")
+        ]
+        [
+          (structural "top")
+          (structural "b")
+          (nixos "desktop")
+        ]
+      ] == [
+        [ "laptop" ]
+        [ "desktop" ]
+      ]
+      # A fork between branches that hold a name under several types
+      # keeps the type.
+      && core.elide [
+        [
+          (nixos "nas")
+          (home "chris")
+        ]
+        [
+          (segment "colmena" "nas")
+          (home "chris")
+        ]
+      ] == [
+        [
+          "nixos/nas"
+          "chris"
+        ]
+        [
+          "colmena/nas"
+          "chris"
+        ]
+      ]
+      # A fork inside a branch is kept beside the fork above it.
+      && core.elide [
+        [
+          (system "x86_64-linux")
+          (nixos "hostname1")
+          (home "user")
+        ]
+        [
+          (system "x86_64-linux")
+          (nixos "hostname2")
+          (home "user")
+        ]
+        [
+          (system "aarch64-linux")
+          (nixos "hostname2")
+          (home "user")
+        ]
+      ] == [
+        [
+          "x86_64-linux"
+          "hostname1"
+          "user"
+        ]
+        [
+          "x86_64-linux"
+          "hostname2"
+          "user"
+        ]
+        [
+          "aarch64-linux"
+          "user"
+        ]
+      ]
+      # Where several segments would tell paths apart, the fork is the
+      # segment nearest the top: the widest scope that separates them.
+      # The segments beneath it differ too and are left out.
+      && core.elide [
+        [
+          (structural "a")
+          (structural "x")
+          (nixos "host-1")
+        ]
+        [
+          (structural "b")
+          (structural "y")
+          (nixos "host-1")
+        ]
+        [
+          (structural "a")
+          (structural "x")
+          (nixos "host-2")
+        ]
+      ] == [
+        [
+          "a"
+          "host-1"
+        ]
+        [
+          "b"
+          "host-1"
+        ]
+        [ "host-2" ]
+      ]
+      # The same holds where the segments beneath the fork are
+      # systems: a name in two groups, each at another system, is told
+      # apart by the group, and the system is left out.
+      && core.elide [
+        [
+          (structural "a")
+          (system "x86_64-linux")
+          (nixos "host-1")
+        ]
+        [
+          (structural "b")
+          (system "aarch64-linux")
+          (nixos "host-1")
+        ]
+      ] == [
+        [
+          "a"
+          "host-1"
+        ]
+        [
+          "b"
+          "host-1"
+        ]
+      ]
+      # Equal paths stay equal, for whoever publishes them to report.
+      && core.elide [
+        [ (nixos "twin") ]
+        [ (nixos "twin") ]
+      ] == [
+        [ "twin" ]
+        [ "twin" ]
+      ];
 
     # What `mkConfiguration` returns is a configuration, a function of
     # exactly `{ name, parent }`, so a parent finalizes it as it
