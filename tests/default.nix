@@ -1664,21 +1664,16 @@ let
       && parent.children.stub.quiet.parent.childless
       && throws parent.children.stub.reader.outputs.marker;
 
-    # What `mkConfiguration` returns is a configuration, a function of
-    # exactly `{ name, parent }`, so a parent finalizes it as it
-    # finalizes any other. The `record` of an integration is carried on
-    # both views and may not name a field mkConfiguration writes. A top is
-    # finalized only under a lib that carries a manifest.
     # An integration that evaluates a configuration at a system
-    # declares `perSystem`. What is declared is then a configuration
-    # whose children are its evaluations, by system, under
-    # `children.system`: an evaluation for every system in force where
-    # it is declared, also when that is a single system. Each
-    # evaluation is named by its system, carries it as `system` and as
-    # the only entry of `systems`, and has the configuration as its
-    # parent. What it declares beneath itself is finalized against its
-    # childless view.
-    lifecyclePerSystemConfigurationHoldsAnEvaluationPerSystem =
+    # declares `perSystem`. A declared configuration is then an
+    # evaluation for every system in force where it is declared, and
+    # finalizing it gives those evaluations by system: as many as
+    # there are systems, also for a single system. Each evaluation
+    # carries the name it is declared under and its system, and its
+    # parent is the system, which sits beneath the parent that
+    # declares the configuration. The systems in force carry on
+    # beneath an evaluation.
+    lifecyclePerSystemConfigurationIsAnEvaluationPerSystem =
       let
         composedWith =
           systems:
@@ -1687,75 +1682,294 @@ let
             name = "probe-project";
             inherit systems;
           };
-        configurationOn =
+        evaluationsOn =
           composed:
           composed.caisson-core.finalizeTop (
             perSystemStubIntegration "machine" composed (lib: {
               marker = "at ${lib.caisson-core.evalManifest.system}";
-              children.stub.beneath = stubIntegration "stub" lib (lib: {
-                marker = lib.caisson-core.evalManifest.nearest.machine.system;
-              });
             })
           );
-        several = configurationOn (composedWith [
+        both = [
           "x86_64-linux"
           "aarch64-linux"
-        ]);
-        single = configurationOn (composedWith [ "x86_64-linux" ]);
-        x86 = several.children.system.x86_64-linux;
-        beneath = x86.children.stub.beneath;
+        ];
+        several = evaluationsOn (composedWith both);
+        single = evaluationsOn (composedWith [ "x86_64-linux" ]);
+        x86 = several.x86_64-linux;
       in
-      several.type == "machine"
-      && several.name == "probe-project"
-      && !(several ? value)
-      && builtins.attrNames several.children == [ "system" ]
-      && builtins.attrNames several.children.system == [
+      builtins.attrNames several == [
         "aarch64-linux"
         "x86_64-linux"
       ]
-      && builtins.length several.inputs == 3
+      && x86._type == "caisson-manifest"
       && x86.type == "machine"
-      && x86.name == "x86_64-linux"
+      && x86.name == "probe-project"
       && x86.system == "x86_64-linux"
-      && x86.systems == [ "x86_64-linux" ]
-      && x86.parent.name == "probe-project"
-      && !(x86.parent ? value)
-      && builtins.length x86.ancestors == 2
+      && x86.systems == both
+      && x86.parent.type == "system"
+      && x86.parent.name == "x86_64-linux"
+      && x86.parent.childless
+      && x86.parent.children == { }
+      && x86.parent.parent.type == "lib"
+      && builtins.map (ancestor: ancestor.type) x86.ancestors == [
+        "lib"
+        "system"
+      ]
       && x86.outputs.marker == "at x86_64-linux"
-      && several.children.system.aarch64-linux.outputs.marker == "at aarch64-linux"
+      && several.aarch64-linux.outputs.marker == "at aarch64-linux"
       && x86.value.seenLib.caisson-core.evalManifest.system == "x86_64-linux"
       && x86.childlessManifest.childless
       && x86.childlessManifest.system == "x86_64-linux"
-      && beneath.parent.childless
-      && beneath.parent.system == "x86_64-linux"
-      && beneath.outputs.marker == "x86_64-linux"
-      && beneath.systems == [ "x86_64-linux" ]
-      && builtins.attrNames single.children.system == [ "x86_64-linux" ]
-      && single.children.system.x86_64-linux.outputs.marker == "at x86_64-linux";
+      && builtins.attrNames single == [ "x86_64-linux" ]
+      && single.x86_64-linux.outputs.marker == "at x86_64-linux";
 
     # No system in force is no evaluation: a configuration declared in
-    # a composition that declares no systems, or an empty list, has no
-    # children, and nothing is refused.
+    # a composition that declares no systems, or an empty list,
+    # finalizes to no evaluations, and nothing is refused.
     lifecyclePerSystemConfigurationWithNoSystemHasNoEvaluation =
       let
-        configurationOn =
+        evaluationsOn =
           composed:
           composed.caisson-core.finalizeTop (
             perSystemStubIntegration "machine" composed (_lib: throw "evaluated with no system")
           );
-        undeclared = configurationOn (core.mkLib { sources = { }; });
-        empty = configurationOn (
+      in
+      evaluationsOn (core.mkLib { sources = { }; }) == { }
+      &&
+        evaluationsOn (
           core.mkLib {
             sources = { };
             systems = [ ];
           }
-        );
-      in
-      undeclared.children.system == { }
-      && empty.children.system == { }
-      && builtins.length undeclared.inputs == 1
-      && undeclared.type == "machine";
+        ) == { };
 
+    # The parent that declares configurations holds, in its full
+    # manifest, each system under `children.system` with the
+    # evaluations declared at it, by integration and then name, beside
+    # the configurations evaluated once for every system. An
+    # evaluation sees the system above it without what is declared
+    # under it. A configuration declared beneath an evaluation has a
+    # system above it in turn, so a system appears on a path as often
+    # as a per-system configuration does.
+    lifecycleParentHoldsEvaluationsUnderTheirSystem =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [
+            "x86_64-linux"
+            "aarch64-linux"
+          ];
+        };
+        machine =
+          lib: marker: children:
+          perSystemStubIntegration "machine" lib (lib: {
+            marker = "${marker} at ${lib.caisson-core.evalManifest.system}";
+            children = children lib;
+          });
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "holder" composed (lib: {
+            marker = "holder";
+            children.machine.alpha = machine lib "alpha" (lib: {
+              machine.image = machine lib "image on ${lib.caisson-core.evalManifest.system}" (_lib: { });
+            });
+            children.machine.beta = machine lib "beta" (_lib: { });
+            children.stub.plain = stubIntegration "stub" lib (_lib: {
+              marker = "plain";
+            });
+          })
+        );
+        x86 = top.children.system.x86_64-linux;
+        alpha = x86.children.machine.alpha;
+        image = alpha.children.system.aarch64-linux.children.machine.image;
+      in
+      builtins.attrNames top.children == [
+        "stub"
+        "system"
+      ]
+      && builtins.attrNames top.children.system == [
+        "aarch64-linux"
+        "x86_64-linux"
+      ]
+      && top.children.stub.plain.outputs.marker == "plain"
+      && x86.type == "system"
+      && x86.name == "x86_64-linux"
+      && !x86.childless
+      && x86.parent.childless
+      && x86.parent.type == "holder"
+      && builtins.attrNames x86.children == [ "machine" ]
+      && builtins.attrNames x86.children.machine == [
+        "alpha"
+        "beta"
+      ]
+      && alpha.name == "alpha"
+      && alpha.outputs.marker == "alpha at x86_64-linux"
+      && alpha.parent.type == "system"
+      && alpha.parent.children == { }
+      && alpha.nearest.holder.childless
+      && x86.children.machine.beta.outputs.marker == "beta at x86_64-linux"
+      && builtins.attrNames alpha.children.system == [
+        "aarch64-linux"
+        "x86_64-linux"
+      ]
+      && image.outputs.marker == "image on x86_64-linux at aarch64-linux"
+      && image.nearest.machine.system == "x86_64-linux"
+      && builtins.map (ancestor: "${ancestor.type}:${ancestor.name}") image.ancestors == [
+        "lib:probe-project"
+        "holder:probe-project"
+        "system:x86_64-linux"
+        "machine:alpha"
+        "system:aarch64-linux"
+      ];
+
+    # `elide` keeps, of each path, its last segment and the segments
+    # where paths that end in the same name fork. A name that is alone
+    # stays bare whatever sits above it, so a system above a
+    # configuration with a single system in force drops out, and the
+    # same name at several systems keeps the system.
+    elideKeepsTheNameAndTheForks =
+      let
+        segment = type: name: { inherit type name; };
+        system = segment "system";
+        nixos = segment "nixos";
+        home = segment "home-manager";
+        structural = segment "structural";
+      in
+      core.elide [ ] == [ ]
+      && core.elide [
+        [
+          (system "x86_64-linux")
+          (nixos "hostname1")
+        ]
+        [
+          (system "x86_64-linux")
+          (nixos "hostname2")
+        ]
+        [
+          (system "aarch64-linux")
+          (nixos "hostname2")
+        ]
+      ] == [
+        [ "hostname1" ]
+        [
+          "x86_64-linux"
+          "hostname2"
+        ]
+        [
+          "aarch64-linux"
+          "hostname2"
+        ]
+      ]
+      # A shared prefix and a segment on which no paths diverge never
+      # appear.
+      && core.elide [
+        [
+          (nixos "hostname2")
+          (system "x86_64-linux")
+          (structural "sub")
+          (home "user")
+        ]
+        [
+          (nixos "hostname2")
+          (system "aarch64-linux")
+          (structural "sub")
+          (home "user")
+        ]
+      ] == [
+        [
+          "x86_64-linux"
+          "user"
+        ]
+        [
+          "aarch64-linux"
+          "user"
+        ]
+      ]
+      # Names that do not collide gain nothing, though their paths
+      # differ.
+      && core.elide [
+        [
+          (structural "top")
+          (structural "a")
+          (nixos "laptop")
+        ]
+        [
+          (structural "top")
+          (structural "b")
+          (nixos "desktop")
+        ]
+      ] == [
+        [ "laptop" ]
+        [ "desktop" ]
+      ]
+      # A fork between branches that hold a name under several types
+      # keeps the type.
+      && core.elide [
+        [
+          (nixos "nas")
+          (home "chris")
+        ]
+        [
+          (segment "colmena" "nas")
+          (home "chris")
+        ]
+      ] == [
+        [
+          "nixos/nas"
+          "chris"
+        ]
+        [
+          "colmena/nas"
+          "chris"
+        ]
+      ]
+      # A fork inside a branch is kept beside the fork above it.
+      && core.elide [
+        [
+          (system "x86_64-linux")
+          (nixos "hostname1")
+          (home "user")
+        ]
+        [
+          (system "x86_64-linux")
+          (nixos "hostname2")
+          (home "user")
+        ]
+        [
+          (system "aarch64-linux")
+          (nixos "hostname2")
+          (home "user")
+        ]
+      ] == [
+        [
+          "x86_64-linux"
+          "hostname1"
+          "user"
+        ]
+        [
+          "x86_64-linux"
+          "hostname2"
+          "user"
+        ]
+        [
+          "aarch64-linux"
+          "user"
+        ]
+      ]
+      # Equal paths stay equal, for whoever publishes them to report.
+      && core.elide [
+        [ (nixos "twin") ]
+        [ (nixos "twin") ]
+      ] == [
+        [ "twin" ]
+        [ "twin" ]
+      ];
+
+    # What `mkConfiguration` returns is a configuration, a function of
+    # exactly `{ name, parent }`, so a parent finalizes it as it
+    # finalizes any other. The `record` of an integration is carried on
+    # both views and may not name a field mkConfiguration writes. A top is
+    # finalized only under a lib that carries a manifest.
     lifecycleEvaluationIsAConfiguration =
       let
         composed = core.mkLib {

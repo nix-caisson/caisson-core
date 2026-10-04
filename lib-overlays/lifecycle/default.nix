@@ -485,7 +485,10 @@ let
   # function's pattern must name exactly `name` and `parent`, which
   # `builtins.functionArgs` reads, so anything else declared where a
   # configuration belongs is refused there. `what` names the
-  # declaration in the messages. The result must be a manifest.
+  # declaration in the messages. The result must be a manifest, or,
+  # for a configuration evaluated at a system, its evaluations: an
+  # attribute set of manifests by system, empty where no system is in
+  # force.
   finalizeChild =
     {
       name,
@@ -513,12 +516,47 @@ let
       ''
     else
       let
-        manifest = child { inherit name parent; };
+        result = child { inherit name parent; };
       in
-      if builtins.isAttrs manifest && (manifest._type or null) == "caisson-manifest" then
-        manifest
+      if isManifest result || isEvaluations result then
+        result
       else
-        throw "The configuration ${what} did not return a manifest.";
+        throw "The configuration ${what} did not return a manifest, or manifests by system.";
+
+  isManifest = value: builtins.isAttrs value && (value._type or null) == "caisson-manifest";
+
+  # The evaluations of a configuration evaluated at a system: manifests
+  # by system.
+  isEvaluations =
+    value:
+    builtins.isAttrs value && !(value ? _type) && builtins.all isManifest (builtins.attrValues value);
+
+  # The system above a configuration evaluated at that system, beneath
+  # `parent`, holding `children`, by integration and then name.
+  systemNode =
+    {
+      parent,
+      system,
+      childless,
+      children,
+    }:
+    builtins.intersectAttrs inheritedFields parent
+    // {
+      _type = "caisson-manifest";
+      type = "system";
+      name = system;
+      inherit
+        system
+        parent
+        childless
+        children
+        ;
+      ancestors = (parent.ancestors or [ ]) ++ [ parent ];
+      nearest =
+        (parent.nearest or { })
+        // (if (parent.type or "lib") == "lib" then { } else { ${parent.type} = parent; });
+      inputs = builtins.concatMap builtins.attrValues (builtins.attrValues children);
+    };
 
   # The record fields a module evaluation reads from its parent: the
   # declared facts and the registries, which are views over the chain.
@@ -572,27 +610,30 @@ let
   # manifest, and each runs on the lib of the declaration rebuilt
   # with that manifest as `evalManifest`. The childless view is the
   # evaluation without the configurations declared beneath it, and it
-  # is what those
-  # configurations are finalized against: the full manifest carries it
-  # as `childlessManifest`, and `evaluate` hands it to `finalizeChild`
-  # as the parent of each child. The full view is the manifest
-  # returned, and its `children` are read from the full evaluation
-  # alone. Nothing forces the childless evaluation until a child, or a
-  # reader of `childlessManifest`, reads its value, so a configuration
-  # with no children is evaluated once.
+  # is what those configurations are finalized against: the full
+  # manifest carries it as `childlessManifest`, and `evaluate` hands it
+  # to `finalizeChild` as the parent of each child. The full view is
+  # the manifest returned, and its `children` are read from the full
+  # evaluation alone. Nothing forces the childless evaluation until a
+  # child, or a reader of `childlessManifest`, reads its value, so a
+  # configuration with no children is evaluated once.
   #
   # With `perSystem`, the integration evaluates a configuration at a
-  # system, and what is declared is a configuration with an evaluation
-  # for every system in force where it is declared. The manifest
-  # returned is the configuration: it carries no value, and its
-  # children, under `children.system`, are its evaluations by system,
-  # as many as there are systems in force and none where there are
-  # none. Each evaluation is a manifest as above, named by its system,
-  # with that system as `system` and as the only entry of `systems`,
-  # and the configuration as its parent; `evaluate` reads the system
-  # from the manifest it is handed. Dropping the system from a name
-  # where nothing needs it is a matter of naming what is published,
-  # and the tree always holds the evaluations by system.
+  # system, and a declared configuration is an evaluation for every
+  # system in force where it is declared: the function returns those
+  # evaluations by system, as many as there are systems in force and
+  # none where there are none. In the tree the system sits above the
+  # name. Each evaluation is a manifest as above, under the name it is
+  # declared by, with its system as `system`, and its parent is the
+  # system: a manifest of type `system`, named by the system, beneath
+  # the parent that declares the configuration. The configuration sees
+  # that system without what is declared under it. The parent's full
+  # manifest holds each system under `children.system`, with the
+  # evaluations declared at it by integration and then name, beside
+  # the configurations that are evaluated once for every system,
+  # which stay under `children.<integration>`. The systems in force
+  # carry on beneath an evaluation, so a configuration declared
+  # beneath it has a system above it in turn.
   mkConfigurationFor =
     final:
     {
@@ -617,7 +658,7 @@ let
       # The fields of a manifest of this integration declared under
       # `name` beneath `parent`.
       baseUnder =
-        name: parent:
+        parent:
         builtins.intersectAttrs inheritedFields parent
         // checkedRecord
         // {
@@ -632,6 +673,65 @@ let
         }
         // (if name == null then { } else { inherit name; });
 
+      # The configurations an evaluation declares, as its manifest
+      # holds them: those evaluated once under their integration, and
+      # the evaluations of those evaluated at a system under that
+      # system.
+      childrenOf =
+        childlessManifest: declared:
+        let
+          select =
+            keep:
+            let
+              kept = builtins.mapAttrs (
+                _: byName:
+                builtins.listToAttrs (
+                  builtins.concatMap (
+                    child:
+                    let
+                      value = keep byName.${child};
+                    in
+                    if value == null then
+                      [ ]
+                    else
+                      [
+                        {
+                          name = child;
+                          inherit value;
+                        }
+                      ]
+                  ) (builtins.attrNames byName)
+                )
+              ) declared;
+            in
+            builtins.removeAttrs kept (
+              builtins.filter (integration: kept.${integration} == { }) (builtins.attrNames kept)
+            );
+          direct = select (finalized: if isManifest finalized then finalized else null);
+          systems = builtins.attrNames (
+            builtins.foldl' (
+              seen: byName:
+              builtins.foldl' (
+                seen: finalized: if isManifest finalized then seen else seen // finalized
+              ) seen (builtins.attrValues byName)
+            ) { } (builtins.attrValues declared)
+          );
+          bySystem = builtins.listToAttrs (
+            builtins.map (system: {
+              name = system;
+              value = systemNode {
+                parent = childlessManifest;
+                inherit system;
+                childless = false;
+                children = select (
+                  finalized: if isManifest finalized then null else finalized.${system} or null
+                );
+              };
+            }) systems
+          );
+        in
+        direct // (if systems == [ ] then { } else { system = bySystem; });
+
       # An evaluation on `base`: its full manifest, which carries the
       # childless manifest.
       evaluation =
@@ -644,7 +744,7 @@ let
                 lib = final.caisson-core.withManifests { evalManifest = manifest; };
                 inherit manifest;
               };
-              children = if childless then { } else evaluated.children or { };
+              children = if childless then { } else childrenOf childlessManifest (evaluated.children or { });
               manifest =
                 base
                 // {
@@ -667,30 +767,125 @@ let
         in
         view false;
 
-      base = baseUnder name parent;
-
-      # A per-system configuration: its children are its evaluations,
-      # under `children.system`, an evaluation for every system in
-      # force where it is declared and none where no system is.
+      # The evaluations of a configuration evaluated at a system: for
+      # every system in force where it is declared, the evaluation
+      # beneath that system.
       systems = if (parent.systems or null) == null then [ ] else parent.systems;
-      configuration = base // {
-        childless = false;
-        children.system = builtins.listToAttrs (
-          builtins.map (system: {
-            name = system;
-            value = evaluation (
-              baseUnder system configuration
-              // {
-                inherit system;
-                systems = [ system ];
-              }
-            );
-          }) systems
-        );
-        inputs = [ libManifest ] ++ builtins.attrValues configuration.children.system;
-      };
+      evaluations = builtins.listToAttrs (
+        builtins.map (system: {
+          name = system;
+          value = evaluation (
+            baseUnder (systemNode {
+              inherit parent system;
+              childless = true;
+              children = { };
+            })
+            // {
+              inherit system;
+            }
+          );
+        }) systems
+      );
     in
-    if perSystem then configuration else evaluation base;
+    if perSystem then evaluations else evaluation (baseUnder parent);
+
+  # The segments needed to tell the things in a tree apart, from the
+  # path of each. A path is the list of `{ type, name }` segments from
+  # the top down to the thing, whose last segment is the name of the
+  # thing. The result has, for each path in order, the segments kept,
+  # as strings, in path order. How kept segments are written out as a
+  # published name is for whoever publishes them.
+  #
+  # The rule keeps the last segment of every path, and beyond it only
+  # the segments where paths that end in the same name fork. Among the
+  # paths that end in a name, it drops the prefix they share, keeps the
+  # segment at which they first differ, and does the same within each
+  # branch. So a name that is alone stays bare, and names that collide
+  # gain the segments that tell them apart. A segment is kept as its
+  # name, or as `type/name` where the branches of that fork hold the
+  # same name under several types. Paths that are equal are left
+  # equal: whoever publishes them reports the clash.
+  elide =
+    paths:
+    let
+      indices = builtins.genList (i: i) (builtins.length paths);
+      pathAt = i: builtins.elemAt paths i;
+      last = path: builtins.length path - 1;
+      leafOf = i: (builtins.elemAt (pathAt i) (last (pathAt i))).name;
+      groups = builtins.groupBy (i: if pathAt i == [ ] then "0" else "1${leafOf i}") indices;
+
+      # The forks among `members`, paths that agree before `depth`:
+      # for each member, the depths at which it forks from the rest.
+      forks =
+        members: depth:
+        if builtins.length members <= 1 then
+          [ ]
+        else
+          let
+            segmentOf =
+              i:
+              let
+                path = pathAt i;
+              in
+              if depth < last path then builtins.elemAt path depth else null;
+            keyOf =
+              i:
+              let
+                segment = segmentOf i;
+              in
+              if segment == null then "" else "${segment.type}/${segment.name}";
+            branches = builtins.groupBy keyOf members;
+            keys = builtins.attrNames branches;
+            names = builtins.map (key: (segmentOf (builtins.head branches.${key})).name) (
+              builtins.filter (key: key != "") keys
+            );
+            shared = name: builtins.length (builtins.filter (other: other == name) names) > 1;
+          in
+          if builtins.length keys == 1 then
+            if keys == [ "" ] then [ ] else forks members (depth + 1)
+          else
+            builtins.concatMap (
+              key:
+              if key == "" then
+                [ ]
+              else
+                let
+                  branch = branches.${key};
+                  segment = segmentOf (builtins.head branch);
+                in
+                builtins.map (i: {
+                  index = i;
+                  inherit depth;
+                  qualified = shared segment.name;
+                }) branch
+                ++ forks branch (depth + 1)
+            ) keys;
+
+      kept = builtins.concatMap (key: forks groups.${key} 0) (builtins.attrNames groups);
+
+      segmentsOf =
+        i:
+        let
+          path = pathAt i;
+          forksOfPath = builtins.filter (fork: fork.index == i) kept;
+          render =
+            depth:
+            let
+              segment = builtins.elemAt path depth;
+              here = builtins.filter (fork: fork.depth == depth) forksOfPath;
+            in
+            if depth == last path then
+              [ segment.name ]
+            else if here == [ ] then
+              [ ]
+            else if (builtins.head here).qualified then
+              [ "${segment.type}/${segment.name}" ]
+            else
+              [ segment.name ];
+        in
+        builtins.concatMap render (builtins.genList (depth: depth) (builtins.length path));
+    in
+    builtins.map segmentsOf indices;
 
   # Finalize the configuration a top ends with: a top has no parent
   # that declares it under an attribute, so it takes the name the
@@ -1481,11 +1676,19 @@ let
           if builtins.isAttrs declared then
             builtins.mapAttrs (
               name: child:
-              finalizeChild {
-                inherit name;
-                parent = registeredManifest;
-                what = "`pkgSets.${name}`";
-              } child
+              let
+                finalized = finalizeChild {
+                  inherit name;
+                  parent = registeredManifest;
+                  what = "`pkgSets.${name}`";
+                } child;
+              in
+              # A package config is a manifest that holds its sets by
+              # system, not a configuration evaluated at a system.
+              if isManifest finalized then
+                finalized
+              else
+                throw "The package config `pkgSets.${name}` did not return a manifest."
             ) declared
           else
             throw ''
@@ -1861,6 +2064,7 @@ in
         contributeModules
         coreEntries
         definers
+        elide
         finalizeChild
         importApply
         manifestOf
