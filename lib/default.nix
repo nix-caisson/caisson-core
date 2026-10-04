@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 #
-# caisson-core, composed from its own entries.
+# caisson-core, composed from the entries it ships.
 #
 # `compose` below is the one primitive: keyed overlay composition with
 # identity, replacement and deterministic order, over plain builtins.
@@ -30,7 +30,7 @@
 #     introduces join the composition, but at the walk's current end:
 #     a replacement inherits the replaced entry's position, and its
 #     imports guarantee reachability, not precedence.
-#   - A key already on the walk's own path is skipped, so cycles
+#   - A key already on the walk's path is skipped, so cycles
 #     terminate; members of a cycle get no mutual ordering guarantee.
 #   - Anonymous (keyless) entries cannot be imported.  They are
 #     collected in consumer-list order and applied after the entire

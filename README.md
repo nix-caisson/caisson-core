@@ -58,7 +58,7 @@ in
   composition, but they land later, guaranteeing reachability rather
   than precedence.
 - **Cycles terminate.** The walk skips a key that is already on its
-  own path. Members of a cycle get no ordering guarantee relative to
+  path. Members of a cycle get no ordering guarantee relative to
   each other; everything else is unaffected.
 - **Keyless entries are a local tail.** An entry with `key = null`
   cannot be imported. Keyless entries apply after the entire keyed
@@ -114,7 +114,7 @@ core.mkLib {
                                       # (configs/<class>/<name>), given
                                       # the bootstrap lib
   libOverlays = mkLibOverlay: { };    # named overlay registrations
-  libOverlayImports = lib: [ lib.caisson-core.libManifest.libOverlays.my-overlay ];
+  libOverlayImports = lib: [ lib.caisson-core.nixpkgs-lib.overlays.my-overlay ];
                                       # selection for this library, given
                                       # the core lib; defaults to every
                                       # project and local registration
@@ -143,7 +143,7 @@ each there because some argument is a function of it. The core lib
 holds caisson-core's entries and nothing else, with the lib
 overlay registry grafted onto its manifest; it is the lib
 `libOverlayImports` receives, so a selection refers to entries as
-`lib.caisson-core.libManifest.libOverlays.<name>`. The bootstrap lib
+`lib.caisson-core.nixpkgs-lib.overlays.<name>`. The bootstrap lib
 adds the selection, the `nixpkgs-lib` entry and every integration
 among it; it is the lib `modules` and `configs` receive, and its
 manifest lacks `modules`, `moduleProjects`, `configs`, `pkgOverlays`
@@ -206,7 +206,9 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
-`definers` and `finalizeChild`,
+`definers`, `finalizeChild`, the lib overlay registry view
+`nixpkgs-lib.overlays` (the manifest's `libOverlays`, which a
+`libOverlayImports` selection refers into),
 plus `compose`,
 `resolve`, `importApply`, `callConsumerFlake`, and the pin readers
 `pins`. A registered overlay file takes the closure
