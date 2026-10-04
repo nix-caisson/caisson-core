@@ -1956,6 +1956,36 @@ let
           "user"
         ]
       ]
+      # Where several segments would tell paths apart, the fork is the
+      # segment nearest the top: the widest scope that separates them.
+      # The segments beneath it differ too and are left out.
+      && core.elide [
+        [
+          (structural "a")
+          (structural "x")
+          (nixos "host-1")
+        ]
+        [
+          (structural "b")
+          (structural "y")
+          (nixos "host-1")
+        ]
+        [
+          (structural "a")
+          (structural "x")
+          (nixos "host-2")
+        ]
+      ] == [
+        [
+          "a"
+          "host-1"
+        ]
+        [
+          "b"
+          "host-1"
+        ]
+        [ "host-2" ]
+      ]
       # Equal paths stay equal, for whoever publishes them to report.
       && core.elide [
         [ (nixos "twin") ]

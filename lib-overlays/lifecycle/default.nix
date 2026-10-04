@@ -801,7 +801,11 @@ let
   # paths that end in a name, it drops the prefix they share, keeps the
   # segment at which they first differ, and does the same within each
   # branch. So a name that is alone stays bare, and names that collide
-  # gain the segments that tell them apart. A segment is kept as its
+  # gain the segments that tell them apart: of the segments that
+  # would, the fork is the segment nearest the top, the widest scope
+  # that separates them, and what differs beneath it is left out
+  # unless paths within that scope still collide. A segment is kept
+  # as its
   # name, or as `type/name` where the branches of that fork hold the
   # same name under several types. Paths that are equal are left
   # equal: whoever publishes them reports the clash.
