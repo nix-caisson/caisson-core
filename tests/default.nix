@@ -1986,6 +1986,30 @@ let
         ]
         [ "host-2" ]
       ]
+      # The same holds where the segments beneath the fork are
+      # systems: a name in two groups, each at another system, is told
+      # apart by the group, and the system is left out.
+      && core.elide [
+        [
+          (structural "a")
+          (system "x86_64-linux")
+          (nixos "host-1")
+        ]
+        [
+          (structural "b")
+          (system "aarch64-linux")
+          (nixos "host-1")
+        ]
+      ] == [
+        [
+          "a"
+          "host-1"
+        ]
+        [
+          "b"
+          "host-1"
+        ]
+      ]
       # Equal paths stay equal, for whoever publishes them to report.
       && core.elide [
         [ (nixos "twin") ]
