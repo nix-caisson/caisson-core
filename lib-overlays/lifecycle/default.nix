@@ -568,11 +568,12 @@ let
     moduleProjects = null;
     modules = null;
     pkgOverlays = null;
-    # The selection of the package set a configuration runs on, where
-    # a configuration at or above this manifest made one (a `record`
-    # field of its integration): it is in force for everything beneath
-    # that configuration, until a configuration beneath records
-    # another.
+    # The selection of the package set a configuration runs on, a
+    # function of the package sets available to it. The top starts
+    # with the set named `default`, and a configuration records
+    # another through the `record` of its integration: a selection is
+    # in force for everything beneath the configuration that records
+    # it, until a configuration beneath records another.
     pkgSet = null;
     pkgSets = null;
     projects = null;
@@ -1751,6 +1752,23 @@ let
           modules = registeredModules;
           moduleProjects = registeredModuleProjects;
           pkgOverlays = registeredPkgOverlays;
+          # The selection of the package set a configuration runs on,
+          # as it stands at the top: the set named `default`, of the
+          # sets available to the configuration. It is in force for the
+          # whole tree until a configuration records another.
+          pkgSet =
+            available:
+            available.default or (throw ''
+              caisson-core: the package set named `default` is selected at the top of
+              the tree, and the package sets available here are ${
+                if available == { } then
+                  "none"
+                else
+                  builtins.concatStringsSep ", " (builtins.attrNames available)
+              }. Declare a package config named `default` with `pkgSets` on mkLib, or
+              select another set where the configuration is constructed
+              (`pkgSet = pkgSets: pkgSets.<name>;`).
+            '');
         };
 
         # The package configs, declared in the lib phase so that every
