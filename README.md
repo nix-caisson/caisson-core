@@ -113,12 +113,17 @@ core.mkLib {
   configs = lib: { };                 # class-keyed configurations
                                       # (configs/<class>/<name>), given
                                       # the bootstrap lib
-  libOverlays = mkLibOverlay: { };    # named overlay registrations
+  libOverlays = lib: { };             # named overlay registrations, given
+                                      # the core lib; an entry is made with
+                                      # lib.caisson-core.mkLibOverlay
   libOverlayImports = lib: [ lib.caisson-core.nixpkgs-lib.overlays.my-overlay ];
                                       # selection for this library, given
                                       # the core lib; defaults to every
                                       # project and local registration
-  pkgOverlays = mkPkgOverlay: { };    # named package overlay registrations
+  extraLibOverlayImports = lib: [ ];  # entries added to that selection
+  pkgOverlays = lib: { };             # named package overlay registrations,
+                                      # given the bootstrap lib; an entry is
+                                      # made with lib.caisson-core.mkPkgOverlay
   pkgSets = lib: { };                 # package configs by config name, each
                                       # an integration's mkConfiguration
                                       # call, given the registered lib
@@ -142,13 +147,16 @@ empty seed with a manifest in `caisson-core.libManifest`, and
 each there because some argument is a function of it. The core lib
 holds caisson-core's entries and nothing else, with the lib
 overlay registry grafted onto its manifest; it is the lib
-`libOverlayImports` receives, so a selection refers to entries as
+`libOverlays` and `libOverlayImports` receive, so a registration
+makes its entries with `lib.caisson-core.mkLibOverlay` and a selection
+refers to entries as
 `lib.caisson-core.nixpkgs-lib.overlays.<name>`. `libOverlayImports`
 replaces the default selection, every registered overlay that is not a
 published entry, and `extraLibOverlayImports`, of the same form, adds
 to the selection, whichever it is. The bootstrap lib
 adds the selection, the `nixpkgs-lib` entry and every integration
-among it; it is the lib `modules` and `configs` receive, and its
+among it; it is the lib `modules`, `configs` and `pkgOverlays`
+receive, and its
 manifest lacks `modules`, `moduleProjects`, `configs`, `pkgOverlays`
 and `pkgSets`. The registered lib is the same entries with those
 registrations grafted on; it is the lib `pkgSets` receives, since a

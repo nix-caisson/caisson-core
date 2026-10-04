@@ -15,16 +15,18 @@
 #   mkLibOverlays ./lib-overlays
 #                              reads <dir>/<name> into the registration
 #                              mkLib takes as `libOverlays`; the leaf is
-#                              `mkLibOverlay` applied to the entry's
-#                              directory.
+#                              `caisson-core.mkLibOverlay` of the lib
+#                              mkLib hands it, applied to the directory
+#                              of the entry.
 #   mkPkgOverlays ./pkg-overlays
 #                              reads <dir>/<name> into the registration
 #                              mkLib takes as `pkgOverlays`; the leaf is
-#                              `mkPkgOverlay` applied to the entry's
-#                              directory.
+#                              `caisson-core.mkPkgOverlay` of the lib
+#                              mkLib hands it, applied to the directory
+#                              of the entry.
 #
-# Each returns the function mkLib takes (`lib: { ... }`,
-# `mkLibOverlay: { ... }`, `mkPkgOverlay: { ... }`), so the call sites read
+# Each returns the function mkLib takes, `lib: { ... }`, so the call
+# sites read
 # `modules = caisson-core.mkModules ./modules;`. An entry is a
 # directory holding a default.nix, a symlink to such a directory
 # included, and anything else in a directory being read is an error:
@@ -92,12 +94,12 @@ let
     ) (subdirectoriesOf "mkModules" dir);
 
   mkLibOverlays =
-    dir: mkLibOverlay:
-    builtins.mapAttrs (_name: path: mkLibOverlay path) (entriesOf "mkLibOverlays" dir);
+    dir: lib:
+    builtins.mapAttrs (_name: path: lib.caisson-core.mkLibOverlay path) (entriesOf "mkLibOverlays" dir);
 
   mkPkgOverlays =
-    dir: mkPkgOverlay:
-    builtins.mapAttrs (_name: path: mkPkgOverlay path) (entriesOf "mkPkgOverlays" dir);
+    dir: lib:
+    builtins.mapAttrs (_name: path: lib.caisson-core.mkPkgOverlay path) (entriesOf "mkPkgOverlays" dir);
 
 in
 {
