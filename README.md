@@ -206,7 +206,8 @@ The composed library carries, under `caisson-core`: `mkLib`,
 `mkNixpkgsLibEntry`, the class-keyed `modules`
 registry, the class index `classes`, the three phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
-`definers`, `finalizeChild`, the lib overlay registry view
+`definers`, `finalizeChild`, `mkEvaluation`, `finalizeTop`, the lib
+overlay registry view
 `nixpkgs-lib.overlays` (the manifest's `libOverlays`, which a
 `libOverlayImports` selection refers into),
 plus `compose`,
@@ -339,7 +340,39 @@ it. It is how the nixpkgs integration hands out `pkgs.lib`, the lib
 the package config was declared under (the registered lib, for a
 `pkgSets` entry) with `pkgsManifest` filled in. Only `pkgsManifest` and
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
-lib carries `withManifests` too, keeping what is already filled in. Every manifest carries
+lib carries `withManifests` too, keeping what is already filled in.
+
+A module evaluation is built by `caisson-core.mkEvaluation { type;
+evaluate; record ? { }; }`, which returns a configuration, the function
+of `{ name, parent }` above. `type` is the name of the integration.
+`evaluate` performs the evaluator's call: it takes `{ lib, manifest }`,
+the lib the evaluation runs on and the manifest being built, and
+returns `value`, `outputs` and `children`, the finalized configurations
+declared beneath by integration and then name. `record` is plain data
+the integration adds to the manifest, and it may not name a field
+`mkEvaluation` writes. The evaluation has two views, each a manifest
+whose lib is the declaring lib rebuilt with that manifest as
+`evalManifest`. The childless view (`childless = true`, no `children`)
+is the evaluation without the configurations declared beneath it. The
+full view is the manifest returned; it carries the childless one as
+`childlessManifest`, and an integration finalizes each child against
+that (`finalizeChild { inherit name; parent =
+manifest.childlessManifest; }`), so a child's `parent` is the
+childless manifest of the configuration that declares it. The
+childless evaluation runs only when a child, or a reader of
+`childlessManifest`, reads its value, so a configuration with no
+children is evaluated once. Both views carry `type`, `name`, `parent`,
+`ancestors` (the parent's list with the parent appended), `nearest`
+(the parent's attrset with the parent under its integration, a lib
+excepted), `inputs` (the lib's manifest, and on the full view the
+childless manifest and the children) and the parent's `sources`,
+`root`, `systems`, `projects`, `defaultEcosystemSrc`, `pkgSets` and
+registries. `caisson-core.finalizeTop configuration` finalizes the
+configuration a top ends with: its name is the name the composition
+declares on `mkLib`, absent when it declares none, and its parent is
+the lib's manifest.
+
+Every manifest carries
 `_type = "caisson-manifest"`, and `manifestOf` finds one in whatever
 a file returns: a manifest, an attrset carrying `caisson.manifest`,
 an evaluated configuration carrying `config.caisson.manifest`, or a

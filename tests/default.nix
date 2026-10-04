@@ -23,6 +23,40 @@ let
 
   throws = expr: !(builtins.tryEval (builtins.deepSeq expr true)).success;
 
+  # A stub integration's constructor, over the lib it is called
+  # through: its evaluator applies `module` to the lib the evaluation
+  # runs on, and it finalizes the configurations the module returns
+  # under `children`, by integration and then name, against the
+  # childless manifest.
+  stubIntegration =
+    type: lib: module:
+    lib.caisson-core.mkEvaluation {
+      inherit type;
+      evaluate =
+        { lib, manifest }:
+        let
+          config = module lib;
+        in
+        {
+          value = {
+            inherit config;
+            seenLib = lib;
+          };
+          outputs.marker = config.marker or null;
+          children = builtins.mapAttrs (
+            integration:
+            builtins.mapAttrs (
+              name:
+              lib.caisson-core.finalizeChild {
+                inherit name;
+                parent = manifest.childlessManifest;
+                what = "`children.${integration}.${name}`";
+              }
+            )
+          ) (config.children or { });
+        };
+    };
+
   # The pin readers' pure parts, read directly.
   flakeLock = import ../lib-overlays/pins/flake-lock.nix;
   npinsData = import ../lib-overlays/pins/npins.nix;
@@ -1474,6 +1508,188 @@ let
       && throws (fill { pkgsManifest = { }; }).pkgsManifest
       && throws (fill [ ]).pkgsManifest
       && (fill { pkgsManifest = null; }).pkgsManifest == null;
+
+    # `mkEvaluation` builds a module evaluation's manifest from the
+    # `evaluate` of an integration. The stub integration here evaluates
+    # a function of the lib, and finalizes the configurations it
+    # returns under `children` against the childless manifest, as the
+    # children option of an integration does.
+    #
+    # The top takes the name the composition declares, and its parent
+    # is the manifest of the lib. Each view runs on a lib whose
+    # `evalManifest` is that view's manifest, and whose `libManifest`
+    # and registries are the ones the composition built.
+    lifecycleEvaluationHasAChildlessAndAFullView =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+          modules = lib: {
+            generic.local = lib.caisson-core.mkModule "generic" ({ ... }: { });
+          };
+        };
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "stub" composed (lib: {
+            marker = lib.caisson-core.evalManifest.childless;
+          })
+        );
+        seen = top.value.seenLib.caisson-core;
+      in
+      top._type == "caisson-manifest"
+      && top.type == "stub"
+      && top.name == "probe-project"
+      && !top.childless
+      && top.outputs.marker == false
+      && top.children == { }
+      && top.parent.type == "lib"
+      && !top.parent.childless
+      && builtins.length top.ancestors == 1
+      && top.nearest == { }
+      && top.systems == [ "x86_64-linux" ]
+      && top.modules.generic ? local
+      && top.childlessManifest.childless
+      && top.childlessManifest.outputs.marker == true
+      && top.childlessManifest.name == "probe-project"
+      && !(top.childlessManifest ? childlessManifest)
+      && builtins.length top.childlessManifest.inputs == 1
+      && builtins.length top.inputs == 2
+      && seen.evalManifest.type == "stub"
+      && !seen.evalManifest.childless
+      && seen.libManifest.name == "probe-project"
+      && seen.modules.generic ? local
+      && (core.manifestOf top.value.seenLib).type == "stub"
+      && composed.caisson-core.evalManifest == null;
+
+    # A child is finalized against the childless view of its parent:
+    # its `parent` and its `nearest.<integration>` are that manifest,
+    # the chain grows by one manifest per level, and the nearest
+    # ancestor of an integration is replaced by a nearer one of the
+    # same integration and kept beneath one of another.
+    lifecycleChildrenAreFinalizedAgainstTheChildlessView =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "outer" composed (lib: {
+            marker = "top:${if lib.caisson-core.evalManifest.childless then "childless" else "full"}";
+            children.outer.middle = stubIntegration "outer" lib (lib: {
+              marker = "middle";
+              children.inner.leaf = stubIntegration "inner" lib (lib: {
+                marker = lib.caisson-core.evalManifest.nearest.outer.outputs.marker;
+              });
+            });
+            children.inner.sibling = stubIntegration "inner" lib (_lib: {
+              marker = "sibling";
+            });
+          })
+        );
+        middle = top.children.outer.middle;
+        leaf = middle.children.inner.leaf;
+        sibling = top.children.inner.sibling;
+      in
+      builtins.attrNames top.children == [
+        "inner"
+        "outer"
+      ]
+      && top.outputs.marker == "top:full"
+      && middle.name == "middle"
+      && middle.type == "outer"
+      && middle.parent.childless
+      && middle.parent.outputs.marker == "top:childless"
+      && middle.parent.children == { }
+      && middle.nearest.outer.outputs.marker == "top:childless"
+      && builtins.length middle.ancestors == 2
+      && sibling.name == "sibling"
+      && sibling.nearest.outer.childless
+      && !(sibling.nearest ? inner)
+      && leaf.name == "leaf"
+      && leaf.parent.childless
+      && leaf.parent.name == "middle"
+      && leaf.outputs.marker == "middle"
+      && leaf.nearest.outer.name == "middle"
+      && builtins.map (ancestor: ancestor.type) leaf.ancestors == [
+        "lib"
+        "outer"
+        "outer"
+      ]
+      && leaf.value.seenLib.caisson-core.evalManifest.name == "leaf"
+      && leaf.value.seenLib.caisson-core.libManifest.name == "probe-project"
+      && builtins.length top.inputs == 4
+      && builtins.length middle.inputs == 3;
+
+    # The childless evaluation runs only when something reads it. An
+    # evaluator that fails in the childless view is harmless to a
+    # configuration with no children, and to one whose children read
+    # nothing of the value of their parent; a child that reads that
+    # value forces it.
+    lifecycleChildlessViewIsEvaluatedOnDemand =
+      let
+        composed = core.mkLib { sources = { }; };
+        failing =
+          lib: module:
+          stubIntegration "stub" lib (
+            lib:
+            if lib.caisson-core.evalManifest.childless then throw "childless view evaluated" else module lib
+          );
+        alone = composed.caisson-core.finalizeTop (failing composed (_lib: { marker = "alone"; }));
+        parent = composed.caisson-core.finalizeTop (
+          failing composed (lib: {
+            marker = "parent";
+            children.stub.quiet = stubIntegration "stub" lib (_lib: { marker = "quiet"; });
+            children.stub.reader = stubIntegration "stub" lib (lib: {
+              marker = lib.caisson-core.evalManifest.parent.outputs.marker;
+            });
+          })
+        );
+      in
+      alone.outputs.marker == "alone"
+      && !(alone ? name)
+      && parent.outputs.marker == "parent"
+      && parent.children.stub.quiet.outputs.marker == "quiet"
+      && parent.children.stub.quiet.parent.childless
+      && throws parent.children.stub.reader.outputs.marker;
+
+    # What `mkEvaluation` returns is a configuration, a function of
+    # exactly `{ name, parent }`, so a parent finalizes it as it
+    # finalizes any other. The `record` of an integration is carried on
+    # both views and may not name a field mkEvaluation writes. A top is
+    # finalized only under a lib that carries a manifest.
+    lifecycleEvaluationIsAConfiguration =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        configuration =
+          record:
+          composed.caisson-core.mkEvaluation {
+            type = "stub";
+            evaluate = _: { value = { }; };
+            inherit record;
+          };
+        recorded = composed.caisson-core.finalizeTop (configuration {
+          ecosystemSrc = "/src";
+        });
+        child = composed.caisson-core.finalizeChild {
+          name = "declared";
+          parent = recorded.childlessManifest;
+        } (configuration { });
+      in
+      builtins.functionArgs (configuration { }) == {
+        name = false;
+        parent = false;
+      }
+      && recorded.ecosystemSrc == "/src"
+      && recorded.childlessManifest.ecosystemSrc == "/src"
+      && recorded.outputs == { }
+      && child.name == "declared"
+      && child.nearest.stub.name == "probe-project"
+      && throws (composed.caisson-core.finalizeTop (configuration { children = { }; }))._type
+      && throws (composed.caisson-core.finalizeTop { })
+      && throws (core.finalizeTop (configuration { }));
 
     lifecyclePkgSetsMustBeAFunctionReturningAnAttrset =
       throws (
