@@ -520,6 +520,150 @@ let
       else
         throw "The configuration ${what} did not return a manifest.";
 
+  # The record fields a module evaluation reads from its parent: the
+  # declared facts and the registries, which are views over the chain.
+  inheritedFields = {
+    configs = null;
+    defaultEcosystemSrc = null;
+    libOverlays = null;
+    moduleProjects = null;
+    modules = null;
+    pkgOverlays = null;
+    pkgSets = null;
+    projects = null;
+    root = null;
+    sources = null;
+    systems = null;
+  };
+
+  # The fields `mkConfiguration` writes, which an integration's `record`
+  # may not name.
+  configurationFields = [
+    "_type"
+    "ancestors"
+    "childless"
+    "childlessManifest"
+    "children"
+    "inputs"
+    "name"
+    "nearest"
+    "outputs"
+    "parent"
+    "type"
+    "value"
+  ];
+
+  # A module evaluation as a configuration: the function of
+  # `{ name, parent }` an integration's constructor returns, which
+  # builds the evaluation's manifest once its name and its parent are
+  # known. `final` is the lib the constructor lives in, the lib the
+  # configuration is declared under.
+  #
+  # `type` is the integration's name. `evaluate` performs the
+  # evaluator's call: it takes `{ lib, manifest }`, the lib the
+  # evaluation runs on and the manifest being built, and returns
+  # `value` (the evaluation as the evaluator returned it), `outputs`
+  # (the integration's references into the value) and `children` (the
+  # finalized configurations declared beneath, by integration and then
+  # name). `record` is plain data the integration adds to the manifest.
+  #
+  # The evaluation has two views. Each is a manifest, and each runs on
+  # the lib of the declaration rebuilt with that manifest as
+  # `evalManifest`. The childless view is the evaluation without the
+  # configurations declared beneath it, and it is what those
+  # configurations are finalized against: the full manifest carries it
+  # as `childlessManifest`, and `evaluate` hands it to `finalizeChild`
+  # as the parent of each child. The full view is the manifest
+  # returned, and its `children` are read from the full evaluation
+  # alone. Nothing forces the childless evaluation until a child, or a
+  # reader of `childlessManifest`, reads its value, so a configuration
+  # with no children is evaluated once.
+  mkConfigurationFor =
+    final:
+    {
+      type,
+      evaluate,
+      record ? { },
+    }:
+    { name, parent }:
+    let
+      owned = builtins.filter (field: record ? ${field}) configurationFields;
+      base =
+        builtins.intersectAttrs inheritedFields parent
+        // (
+          if owned == [ ] then
+            record
+          else
+            throw ''
+              caisson-core.mkConfiguration: the `${type}` integration's `record` names
+              `${builtins.head owned}`, a field mkConfiguration writes.
+            ''
+        )
+        // {
+          _type = "caisson-manifest";
+          inherit type parent;
+          ancestors = (parent.ancestors or [ ]) ++ [ parent ];
+          # The nearest ancestor of each integration. A lib is the root
+          # of the chain and no integration, so it is not among them.
+          nearest =
+            (parent.nearest or { })
+            // (if (parent.type or "lib") == "lib" then { } else { ${parent.type} = parent; });
+        }
+        // (if name == null then { } else { inherit name; });
+      libManifest = final.caisson-core.libManifest;
+      view =
+        childless:
+        let
+          evaluated = evaluate {
+            lib = final.caisson-core.withManifests { evalManifest = manifest; };
+            inherit manifest;
+          };
+          children = if childless then { } else evaluated.children or { };
+          manifest =
+            base
+            // {
+              inherit childless children;
+              value = evaluated.value;
+              outputs = evaluated.outputs or { };
+              inputs =
+                [ libManifest ]
+                ++ (
+                  if childless then
+                    [ ]
+                  else
+                    [ childlessManifest ] ++ builtins.concatMap builtins.attrValues (builtins.attrValues children)
+                );
+            }
+            // (if childless then { } else { inherit childlessManifest; });
+        in
+        manifest;
+      childlessManifest = view true;
+    in
+    view false;
+
+  # Finalize the configuration a top ends with: a top has no parent
+  # that declares it under an attribute, so it takes the name the
+  # composition declares on mkLib, none when the composition declares
+  # none, and the lib's manifest as its parent.
+  finalizeTopFor =
+    final: configuration:
+    let
+      libManifest = final.caisson-core.libManifest;
+    in
+    if libManifest == null then
+      throw ''
+        caisson-core.finalizeTop finalizes a configuration under a
+        composition's manifest, but this library carries none at
+        `caisson-core.libManifest`. Compose the library with
+        caisson-core.mkLib, which captures one.
+      ''
+    else
+      finalizeChild {
+        name = libManifest.name or null;
+        parent = libManifest;
+        what = "The top configuration";
+      } configuration;
+
   # The layers that define a name, from a manifest's history: given a
   # manifest and an attribute path (`[ "my-project" "helper" ]`), the
   # layer events whose layer defines that path, in composition order,
@@ -1671,6 +1815,8 @@ in
         mkNixpkgsLibEntry
         pkgOverlaysFor
         ;
+      mkConfiguration = mkConfigurationFor final;
+      finalizeTop = finalizeTopFor final;
       mkPkgOverlay = mkPkgOverlayFor {
         sources = closure-inputs;
         finalLib = final;
