@@ -568,6 +568,12 @@ let
     moduleProjects = null;
     modules = null;
     pkgOverlays = null;
+    # The selection of the package set a configuration runs on, where
+    # a configuration at or above this manifest made one (a `record`
+    # field of its integration): it is in force for everything beneath
+    # that configuration, until a configuration beneath records
+    # another.
+    pkgSet = null;
     pkgSets = null;
     projects = null;
     root = null;
