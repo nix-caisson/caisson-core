@@ -5,27 +5,32 @@
 # directory.
 #
 #   mkModules ./modules        reads <dir>/<class>/<name> into the
-#                              class-keyed registration mkLib takes as
+#                              class-keyed registrations mkLib takes as
 #                              `modules` and as `configs`; the leaf is
 #                              the `mkModule` of the integration that
 #                              declares the class, found in the class
-#                              index of the composed library
+#                              index of the library
 #                              (`caisson-core.classes.<class>`), applied
-#                              to the entry's directory.
+#                              to the directory of the entry.
 #   mkLibOverlays ./lib-overlays
-#                              reads <dir>/<name> into the registration
+#                              reads <dir>/<name> into the registrations
 #                              mkLib takes as `libOverlays`; the leaf is
-#                              `mkLibOverlay` applied to the entry's
-#                              directory.
+#                              `caisson-core.mkLibOverlay` of the
+#                              library, applied to the directory of the
+#                              entry.
 #   mkPkgOverlays ./pkg-overlays
-#                              reads <dir>/<name> into the registration
+#                              reads <dir>/<name> into the registrations
 #                              mkLib takes as `pkgOverlays`; the leaf is
-#                              `mkPkgOverlay` applied to the entry's
-#                              directory.
+#                              `caisson-core.mkPkgOverlay` of the
+#                              library, applied to the directory of the
+#                              entry.
 #
-# Each returns the function mkLib takes (`lib: { ... }`,
-# `mkLibOverlay: { ... }`, `mkPkgOverlay: { ... }`), so the call sites read
-# `modules = caisson-core.mkModules ./modules;`. An entry is a
+# A reader belongs to the library it is read from and uses the class
+# index and the constructors of that library. The registry functions
+# of mkLib each receive a library, so a call site takes the reader
+# from it: `modules = lib: lib.caisson-core.mkModules ./modules;`. A
+# composition that registers another `caisson-core/readers` entry gets
+# that entry's readers at every such call site. An entry is a
 # directory holding a default.nix, a symlink to such a directory
 # included, and anything else in a directory being read is an error:
 # a stray file
@@ -69,7 +74,7 @@ let
     ) (subdirectoriesOf what dir);
 
   mkModules =
-    dir: composedLib:
+    composedLib: dir:
     let
       classes = composedLib.caisson-core.classes or { };
       mkModuleOf =
@@ -92,18 +97,22 @@ let
     ) (subdirectoriesOf "mkModules" dir);
 
   mkLibOverlays =
-    dir: mkLibOverlay:
-    builtins.mapAttrs (_name: path: mkLibOverlay path) (entriesOf "mkLibOverlays" dir);
+    lib: dir:
+    builtins.mapAttrs (_name: path: lib.caisson-core.mkLibOverlay path) (entriesOf "mkLibOverlays" dir);
 
   mkPkgOverlays =
-    dir: mkPkgOverlay:
-    builtins.mapAttrs (_name: path: mkPkgOverlay path) (entriesOf "mkPkgOverlays" dir);
+    lib: dir:
+    builtins.mapAttrs (_name: path: lib.caisson-core.mkPkgOverlay path) (entriesOf "mkPkgOverlays" dir);
 
 in
 {
-  overlay = _final: prev: {
+  # Each reader is bound to the lib it is read from: the class index
+  # and the entry constructors it uses are those of that lib.
+  overlay = final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
-      inherit mkModules mkLibOverlays mkPkgOverlays;
+      mkModules = mkModules final;
+      mkLibOverlays = mkLibOverlays final;
+      mkPkgOverlays = mkPkgOverlays final;
     };
   };
 }

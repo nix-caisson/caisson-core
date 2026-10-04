@@ -1116,11 +1116,15 @@ let
       defaultEcosystemSrc ? null,
       # Consumed projects' contributions, by project name.
       projects ? null,
-      # `lib: { <class>.<name> = module; }`, usually mkModules ./modules.
+      # `lib: { <class>.<name> = module; }`, given the bootstrap lib;
+      # usually `lib: lib.caisson-core.mkModules ./modules`.
       modules ? null,
-      # `lib: { <class>.<name> = configuration; }`, usually mkModules ./configs.
+      # `lib: { <class>.<name> = configuration; }`, given the bootstrap
+      # lib; usually `lib: lib.caisson-core.mkModules ./configs`.
       configs ? null,
-      # `mkLibOverlay: { <name> = overlay; }`, usually mkLibOverlays ./lib-overlays.
+      # `lib: { <name> = overlay; }`, given the core lib, whose
+      # `caisson-core.mkLibOverlay` makes an entry; usually
+      # `lib: lib.caisson-core.mkLibOverlays ./lib-overlays`.
       libOverlays ? null,
       # `lib: [ <entry> ]`: which registered overlays apply to this
       # composition, given the core lib, which carries the registry as
@@ -1131,7 +1135,9 @@ let
       # `lib: [ <entry> ]`: registered overlays added to that
       # selection, whichever it is.
       extraLibOverlayImports ? null,
-      # `mkPkgOverlay: { <name> = entry; }`, usually mkPkgOverlays ./pkg-overlays:
+      # `lib: { <name> = entry; }`, given the bootstrap lib, whose
+      # `caisson-core.mkPkgOverlay` makes an entry; usually
+      # `lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays`:
       # the package overlays this tree registers, keyed entries whose
       # `overlay` is a nixpkgs overlay. Nothing here applies them; a
       # package set selects from the registry through pkgOverlaysFor.
@@ -1221,8 +1227,8 @@ let
 
         rawModules = given "modules" (_lib: { });
         rawConfigs = given "configs" (_lib: { });
-        rawLibOverlays = given "libOverlays" (mkLibOverlay: { });
-        rawPkgOverlays = given "pkgOverlays" (mkPkgOverlay: { });
+        rawLibOverlays = given "libOverlays" (_lib: { });
+        rawPkgOverlays = given "pkgOverlays" (_lib: { });
         rawPkgSets = given "pkgSets" (_lib: { });
         rawLibOverlayImports = given "libOverlayImports" (
           lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays publishedNames)
@@ -1426,8 +1432,10 @@ let
           else
             throw ''
               mkLib expects `modules` to be a function taking the bootstrap
-              library (`lib: { ... }`), but got a ${builtins.typeOf rawModules}. Take
-              the argument and ignore it (`_lib: { ... }`) if you do not need it.
+              library (`lib: { ... }`), usually
+              `lib: lib.caisson-core.mkModules ./modules`, but got a
+              ${builtins.typeOf rawModules}. Take the argument and ignore it
+              (`_lib: { ... }`) if you do not need it.
             '';
         # The configurations of this tree, keyed by module class then
         # name (`configs/<class>/<name>` on disk): the modules a top
@@ -1440,31 +1448,36 @@ let
           else
             throw ''
               mkLib expects `configs` to be a function taking the bootstrap
-              library (`lib: { ... }`), but got a ${builtins.typeOf rawConfigs}. Take
-              the argument and ignore it (`_lib: { ... }`) if you do not need it.
+              library (`lib: { ... }`), usually
+              `lib: lib.caisson-core.mkModules ./configs`, but got a
+              ${builtins.typeOf rawConfigs}. Take the argument and ignore it
+              (`_lib: { ... }`) if you do not need it.
             '';
+        # The lib overlay registrations, from the core lib, which
+        # carries the entry constructor as `caisson-core.mkLibOverlay`.
         libOverlays =
           if builtins.isFunction rawLibOverlays then
-            rawLibOverlays mkLibOverlayHere
+            rawLibOverlays coreLib
           else
             throw ''
-              mkLib expects `libOverlays` to be a function taking the
-              input-closed mkLibOverlay helper (`mkLibOverlay: { ... }`), but
-              got a ${builtins.typeOf rawLibOverlays}. Take the argument and
-              ignore it (`_mkLibOverlay: { ... }`) if you only register
-              already-built overlays.
+              mkLib expects `libOverlays` to be a function taking the core
+              library (`lib: { <name> = lib.caisson-core.mkLibOverlay ./x; }`),
+              usually `lib: lib.caisson-core.mkLibOverlays ./lib-overlays`, but got a
+              ${builtins.typeOf rawLibOverlays}. Take the argument and ignore it
+              (`_lib: { ... }`) if you only register already-built overlays.
             '';
 
+        # The package overlay registrations, from the bootstrap lib,
+        # which carries the entry constructor as
+        # `caisson-core.mkPkgOverlay`.
         localPkgOverlays =
           if builtins.isFunction rawPkgOverlays then
-            rawPkgOverlays (mkPkgOverlayFor {
-              inherit sources finalLib;
-            })
+            rawPkgOverlays bootstrapLib
           else
             throw ''
-              mkLib expects `pkgOverlays` to be a function taking the
-              composition-bound mkPkgOverlay helper (`mkPkgOverlay: { ... }`),
-              usually `mkPkgOverlays ./pkg-overlays`, but got a
+              mkLib expects `pkgOverlays` to be a function taking the bootstrap
+              library (`lib: { <name> = lib.caisson-core.mkPkgOverlay ./x; }`),
+              usually `lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays`, but got a
               ${builtins.typeOf rawPkgOverlays}.
             '';
 

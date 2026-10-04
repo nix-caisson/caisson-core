@@ -167,13 +167,13 @@ let
   # project's default entry through the consumer's registry.
   pkgOverlayProducer = core.mkLib {
     sources = { };
-    pkgOverlays = core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
+    pkgOverlays = lib: lib.caisson-core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
   };
   pkgOverlayConsumer = core.mkLib {
     sources = { };
     projects.producer.pkgOverlays = pkgOverlayProducer.caisson-core.libManifest.pkgOverlays;
-    pkgOverlays = mkPkgOverlay: {
-      local = mkPkgOverlay (
+    pkgOverlays = lib: {
+      local = lib.caisson-core.mkPkgOverlay (
         { closure-lib, ... }:
         {
           imports = [ closure-lib.caisson-core.libManifest.pkgOverlays."producer/default" ];
@@ -456,8 +456,8 @@ let
         };
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            main = mkLibOverlay (
+          libOverlays = lib: {
+            main = lib.caisson-core.mkLibOverlay (
               { ... }:
               {
                 imports = [ deep ];
@@ -485,9 +485,9 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            a-base = mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = 1; }; });
-            b = mkLibOverlay (
+          libOverlays = lib: {
+            a-base = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = 1; }; });
+            b = lib.caisson-core.mkLibOverlay (
               { ... }:
               {
                 overlay = _final: prev: { x = prev.marker + 1; };
@@ -507,8 +507,8 @@ let
         composed = core.mkLib {
           sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
-          libOverlays = mkLibOverlay: {
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            probe = lib.caisson-core.mkLibOverlay (
               { entries, ... }:
               {
                 imports = [ entries.nixpkgs-lib ];
@@ -528,8 +528,8 @@ let
         composed = core.mkLib {
           sources = { };
           defaultEcosystemSrc.nixpkgs = ./fixtures/nixpkgs-lib-stub;
-          libOverlays = mkLibOverlay: {
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            probe = lib.caisson-core.mkLibOverlay (
               { entries, ... }:
               {
                 imports = [ entries.nixpkgs-lib ];
@@ -545,8 +545,8 @@ let
       throws
         (core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            probe = lib.caisson-core.mkLibOverlay (
               { entries, ... }:
               {
                 imports = [ entries.nixpkgs-lib ];
@@ -564,8 +564,8 @@ let
         otherTree = core.mkLib {
           sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
-          libOverlays = mkLibOverlay: {
-            exported = mkLibOverlay (
+          libOverlays = lib: {
+            exported = lib.caisson-core.mkLibOverlay (
               { entries, ... }:
               {
                 imports = [ entries.nixpkgs-lib ];
@@ -576,8 +576,8 @@ let
         };
         here = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            nixpkgs-lib = mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
+          libOverlays = lib: {
+            nixpkgs-lib = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
             borrowed = otherTree.caisson-core.libManifest.libOverlays.exported;
           };
         };
@@ -593,8 +593,8 @@ let
           marker:
           (core.mkLib {
             sources = { };
-            libOverlays = mkLibOverlay: {
-              default = mkLibOverlay ({ ... }: { overlay = _final: _prev: { ${marker} = true; }; });
+            libOverlays = lib: {
+              default = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { ${marker} = true; }; });
             };
           }).caisson-core.libManifest.libOverlays;
         composed = core.mkLib {
@@ -621,9 +621,9 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            nixpkgs-lib = mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            nixpkgs-lib = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
+            probe = lib.caisson-core.mkLibOverlay (
               { entries, ... }:
               {
                 imports = [ entries.nixpkgs-lib ];
@@ -648,8 +648,8 @@ let
           sources = {
             probe = 42;
           };
-          libOverlays = mkLibOverlay: {
-            a = mkLibOverlay (
+          libOverlays = lib: {
+            a = lib.caisson-core.mkLibOverlay (
               { closure-inputs, ... }:
               {
                 overlay = _final: _prev: { seen = closure-inputs.probe; };
@@ -687,9 +687,9 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            marker = mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = "composed"; }; });
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            marker = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = "composed"; }; });
+            probe = lib.caisson-core.mkLibOverlay (
               { closure-lib, ... }:
               {
                 overlay = _final: _prev: { probe = closure-lib.marker; };
@@ -704,8 +704,8 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          modules = core.mkModules ./fixtures/modules-dir;
-          libOverlays = mkLibOverlay: { classes = mkLibOverlay declaringClasses; };
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
+          libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
         };
         registry = composed.caisson-core.modules;
         origin = m: (builtins.head m.imports).config.origin;
@@ -726,8 +726,8 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          configs = core.mkModules ./fixtures/modules-dir;
-          libOverlays = mkLibOverlay: { classes = mkLibOverlay declaringClasses; };
+          configs = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
+          libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
         };
       in
       (builtins.head composed.caisson-core.configs.flake.default.imports).config.origin
@@ -754,10 +754,10 @@ let
           };
         composed = core.mkLib {
           sources = { };
-          modules = core.mkModules ./fixtures/modules-dir;
-          libOverlays = mkLibOverlay: {
-            classes = mkLibOverlay declaringClasses;
-            wrapper = mkLibOverlay wrapping;
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
+          libOverlays = lib: {
+            classes = lib.caisson-core.mkLibOverlay declaringClasses;
+            wrapper = lib.caisson-core.mkLibOverlay wrapping;
           };
           libOverlayImports = lib: [
             lib.caisson-core.nixpkgs-lib.overlays.classes
@@ -774,26 +774,35 @@ let
       throws
         (core.mkLib {
           sources = { };
-          modules = core.mkModules ./fixtures/modules-dir;
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
         }).caisson-core.modules.flake;
 
-    readersMkModulesRefusesAStrayFile = throws (
-      (core.mkModules ./fixtures/modules-dir-stray) {
-        caisson-core.classes.flake.mkModule = path: path;
-      }
-    );
+    # The refusals are read from a library that declares the class of
+    # the fixture, so what throws is the directory and not the class.
+    readersMkModulesRefusesAStrayFile =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
+        };
+      in
+      builtins.isAttrs (composed.caisson-core.mkModules ./fixtures/modules-dir)
+      && throws (composed.caisson-core.mkModules ./fixtures/modules-dir-stray);
 
-    readersMkModulesRefusesAnEntryWithoutDefault = throws (
-      (core.mkModules ./fixtures/modules-dir-empty-entry) {
-        caisson-core.classes.flake.mkModule = path: path;
-      }
-    );
+    readersMkModulesRefusesAnEntryWithoutDefault =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = lib: { classes = lib.caisson-core.mkLibOverlay declaringClasses; };
+        };
+      in
+      throws (composed.caisson-core.mkModules ./fixtures/modules-dir-empty-entry);
 
     readersMkLibOverlaysReadsEntries =
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = core.mkLibOverlays ./fixtures/lib-overlays-dir;
+          libOverlays = lib: lib.caisson-core.mkLibOverlays ./fixtures/lib-overlays-dir;
         };
       in
       composed.fromDefault
@@ -807,7 +816,7 @@ let
         ];
 
     readersMkLibOverlaysRefusesAStrayFile = throws (
-      (core.mkLibOverlays ./fixtures/lib-overlays-dir-stray) (path: path)
+      core.mkLibOverlays ./fixtures/lib-overlays-dir-stray
     );
 
     # Package overlays: registered in mkLib beside libOverlays, keyed by
@@ -816,8 +825,8 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          pkgOverlays = mkPkgOverlay: {
-            hello = mkPkgOverlay ({ ... }: { overlay = _final: _prev: { hello = "hi"; }; });
+          pkgOverlays = lib: {
+            hello = lib.caisson-core.mkPkgOverlay ({ ... }: { overlay = _final: _prev: { hello = "hi"; }; });
           };
         };
         entry = composed.caisson-core.libManifest.pkgOverlays.hello;
@@ -852,7 +861,7 @@ let
       && applied.base == "extra+base";
 
     readersMkPkgOverlaysRefusesAStrayFile = throws (
-      (core.mkPkgOverlays ./fixtures/lib-overlays-dir-stray) (path: path)
+      core.mkPkgOverlays ./fixtures/lib-overlays-dir-stray
     );
 
     # A consumed project's entries join under `<project>/<name>`, their
@@ -997,7 +1006,7 @@ let
           modules = composedLib: {
             nixos.shared = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
           };
-          libOverlays = mkLibOverlay: { c = mkLibOverlay contributor; };
+          libOverlays = lib: { c = lib.caisson-core.mkLibOverlay contributor; };
         };
         registry = composed.caisson-core.modules.nixos;
       in
@@ -1021,8 +1030,8 @@ let
           modules = composedLib: {
             nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
           };
-          libOverlays = mkLibOverlay: {
-            a = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
+          libOverlays = lib: {
+            a = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
           };
         };
         manifest = composed.caisson-core.libManifest;
@@ -1178,9 +1187,9 @@ let
         };
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            base = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
-            top = mkLibOverlay (
+          libOverlays = lib: {
+            base = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
+            top = lib.caisson-core.mkLibOverlay (
               { ... }:
               {
                 imports = [ adHoc ];
@@ -1218,9 +1227,9 @@ let
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
-          libOverlays = mkLibOverlay: {
-            base = mkLibOverlay ./fixtures/history-overlays/base;
-            top = mkLibOverlay ./fixtures/history-overlays/top;
+          libOverlays = lib: {
+            base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
+            top = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/top;
           };
           libOverlayImports = lib: [
             lib.caisson-core.nixpkgs-lib.overlays.base
@@ -1264,8 +1273,8 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            base = mkLibOverlay ./fixtures/history-overlays/base;
+          libOverlays = lib: {
+            base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
           };
           libOverlayImports = lib: [
             lib.caisson-core.nixpkgs-lib.overlays.base
@@ -1297,8 +1306,8 @@ let
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
-          libOverlays = mkLibOverlay: {
-            base = mkLibOverlay ./fixtures/history-overlays/base;
+          libOverlays = lib: {
+            base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
           };
           libOverlayImports = lib: [
             lib.caisson-core.nixpkgs-lib.overlays.base
@@ -1396,8 +1405,8 @@ let
           modules = lib: {
             generic.local = lib.caisson-core.mkModule "generic" ({ ... }: { });
           };
-          pkgOverlays = mkPkgOverlay: {
-            tool = mkPkgOverlay ({ ... }: { overlay = _final: _prev: { }; });
+          pkgOverlays = lib: {
+            tool = lib.caisson-core.mkPkgOverlay ({ ... }: { overlay = _final: _prev: { }; });
           };
           pkgSets = lib: {
             default = stubConfiguration lib;
@@ -1487,8 +1496,8 @@ let
         };
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            reader = mkLibOverlay (
+          libOverlays = lib: {
+            reader = lib.caisson-core.mkLibOverlay (
               { ... }:
               {
                 overlay = final: _prev: { readPkgsManifest = final.caisson-core.pkgsManifest; };
@@ -2138,9 +2147,9 @@ let
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
-          libOverlays = mkLibOverlay: {
-            base = mkLibOverlay ./fixtures/history-overlays/base;
-            top = mkLibOverlay ./fixtures/history-overlays/top;
+          libOverlays = lib: {
+            base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
+            top = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/top;
           };
           libOverlayImports = lib: [
             lib.caisson-core.nixpkgs-lib.overlays.base
@@ -2189,8 +2198,8 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            "caisson-core/pins" = mkLibOverlay (
+          libOverlays = lib: {
+            "caisson-core/pins" = lib.caisson-core.mkLibOverlay (
               { ... }:
               {
                 overlay = _final: prev: {
@@ -2221,6 +2230,33 @@ let
       ]
       && (builtins.elemAt pinsDefiners 1).value == "replaced";
 
+    # A registry function takes its reader from the library it is
+    # handed, so a composition that registers another
+    # `caisson-core/readers` entry reads its directories with that
+    # entry.
+    lifecycleReadersComeFromTheLibraryHandedIn =
+      let
+        composed = core.mkLib {
+          sources = { };
+          libOverlays = lib: {
+            "caisson-core/readers" = lib.caisson-core.mkLibOverlay (
+              { ... }:
+              {
+                overlay = _final: prev: {
+                  caisson-core = prev.caisson-core // {
+                    mkModules = dir: { generic.readBy = "the replacement, at ${baseNameOf dir}"; };
+                  };
+                };
+              }
+            );
+          };
+          modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
+        };
+      in
+      composed.caisson-core.modules.generic == {
+        readBy = "the replacement, at modules-dir";
+      };
+
     # `libOverlayImports` replaces the default selection, every
     # registered overlay, and `extraLibOverlayImports` adds to the
     # selection, whichever it is.
@@ -2235,7 +2271,7 @@ let
           core.mkLib (
             {
               sources = { };
-              libOverlays = _mkLibOverlay: {
+              libOverlays = _lib: {
                 one = marking "one";
                 two = marking "two";
               };
@@ -2288,9 +2324,9 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          libOverlays = mkLibOverlay: {
-            base = mkLibOverlay ./fixtures/history-overlays/base;
-            top = mkLibOverlay ./fixtures/history-overlays/top;
+          libOverlays = lib: {
+            base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
+            top = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/top;
           };
           libOverlayImports = lib: [
             lib.caisson-core.nixpkgs-lib.overlays.base
@@ -2368,8 +2404,8 @@ let
         inner = outer.caisson-core.mkLib {
           sources = { };
           defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
-          libOverlays = mkLibOverlay: {
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            probe = lib.caisson-core.mkLibOverlay (
               { entries, ... }:
               {
                 imports = [ entries.nixpkgs-lib ];
@@ -2435,8 +2471,8 @@ let
           projects = {
             inherit dep;
           };
-          libOverlays = mkLibOverlay: {
-            local = mkLibOverlay ({ ... }: { overlay = _final: _prev: { fromLocal = true; }; });
+          libOverlays = lib: {
+            local = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { fromLocal = true; }; });
           };
           # Per-item choice over the combined dictionary: prefixed
           # project names beside local short names.
@@ -2496,8 +2532,8 @@ let
             projects = {
               inherit dep;
             };
-            libOverlays = mkLibOverlay: {
-              local = mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
+            libOverlays = lib: {
+              local = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
             };
           }).caisson-core.libManifest.libOverlays;
       in
@@ -2578,8 +2614,8 @@ let
             outPath = ./fixtures;
             dirty = false;
           };
-          libOverlays = mkLibOverlay: {
-            probe = mkLibOverlay (
+          libOverlays = lib: {
+            probe = lib.caisson-core.mkLibOverlay (
               { closure-inputs, ... }:
               {
                 overlay = _final: _prev: { closed = closure-inputs; };
@@ -2628,8 +2664,8 @@ let
     lifecycleNixpkgsLibFromSources =
       (core.mkLib {
         sources.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
-        libOverlays = mkLibOverlay: {
-          a = mkLibOverlay (
+        libOverlays = lib: {
+          a = lib.caisson-core.mkLibOverlay (
             { entries, ... }:
             {
               imports = [ entries.nixpkgs-lib ];
