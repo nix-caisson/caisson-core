@@ -549,6 +549,7 @@ let
     "nearest"
     "outputs"
     "parent"
+    "system"
     "type"
     "value"
   ];
@@ -579,27 +580,46 @@ let
   # alone. Nothing forces the childless evaluation until a child, or a
   # reader of `childlessManifest`, reads its value, so a configuration
   # with no children is evaluated once.
+  #
+  # With `perSystem`, the integration evaluates a configuration at a
+  # system, and what is declared is a configuration with an evaluation
+  # for every system in force where it is declared. The manifest
+  # returned is the configuration: it carries no value, and its
+  # children, under `children.system`, are its evaluations by system,
+  # as many as there are systems in force and none where there are
+  # none. Each evaluation is a manifest as above, named by its system,
+  # with that system as `system` and as the only entry of `systems`,
+  # and the configuration as its parent; `evaluate` reads the system
+  # from the manifest it is handed. Dropping the system from a name
+  # where nothing needs it is a matter of naming what is published,
+  # and the tree always holds the evaluations by system.
   mkConfigurationFor =
     final:
     {
       type,
       evaluate,
       record ? { },
+      perSystem ? false,
     }:
     { name, parent }:
     let
       owned = builtins.filter (field: record ? ${field}) configurationFields;
-      base =
+      checkedRecord =
+        if owned == [ ] then
+          record
+        else
+          throw ''
+            caisson-core.mkConfiguration: the `${type}` integration's `record` names
+            `${builtins.head owned}`, a field mkConfiguration writes.
+          '';
+      libManifest = final.caisson-core.libManifest;
+
+      # The fields of a manifest of this integration declared under
+      # `name` beneath `parent`.
+      baseUnder =
+        name: parent:
         builtins.intersectAttrs inheritedFields parent
-        // (
-          if owned == [ ] then
-            record
-          else
-            throw ''
-              caisson-core.mkConfiguration: the `${type}` integration's `record` names
-              `${builtins.head owned}`, a field mkConfiguration writes.
-            ''
-        )
+        // checkedRecord
         // {
           _type = "caisson-manifest";
           inherit type parent;
@@ -611,36 +631,66 @@ let
             // (if (parent.type or "lib") == "lib" then { } else { ${parent.type} = parent; });
         }
         // (if name == null then { } else { inherit name; });
-      libManifest = final.caisson-core.libManifest;
-      view =
-        childless:
+
+      # An evaluation on `base`: its full manifest, which carries the
+      # childless manifest.
+      evaluation =
+        base:
         let
-          evaluated = evaluate {
-            lib = final.caisson-core.withManifests { evalManifest = manifest; };
-            inherit manifest;
-          };
-          children = if childless then { } else evaluated.children or { };
-          manifest =
-            base
-            // {
-              inherit childless children;
-              value = evaluated.value;
-              outputs = evaluated.outputs or { };
-              inputs =
-                [ libManifest ]
-                ++ (
-                  if childless then
-                    [ ]
-                  else
-                    [ childlessManifest ] ++ builtins.concatMap builtins.attrValues (builtins.attrValues children)
-                );
-            }
-            // (if childless then { } else { inherit childlessManifest; });
+          view =
+            childless:
+            let
+              evaluated = evaluate {
+                lib = final.caisson-core.withManifests { evalManifest = manifest; };
+                inherit manifest;
+              };
+              children = if childless then { } else evaluated.children or { };
+              manifest =
+                base
+                // {
+                  inherit childless children;
+                  value = evaluated.value;
+                  outputs = evaluated.outputs or { };
+                  inputs =
+                    [ libManifest ]
+                    ++ (
+                      if childless then
+                        [ ]
+                      else
+                        [ childlessManifest ] ++ builtins.concatMap builtins.attrValues (builtins.attrValues children)
+                    );
+                }
+                // (if childless then { } else { inherit childlessManifest; });
+            in
+            manifest;
+          childlessManifest = view true;
         in
-        manifest;
-      childlessManifest = view true;
+        view false;
+
+      base = baseUnder name parent;
+
+      # A per-system configuration: its children are its evaluations,
+      # under `children.system`, an evaluation for every system in
+      # force where it is declared and none where no system is.
+      systems = if (parent.systems or null) == null then [ ] else parent.systems;
+      configuration = base // {
+        childless = false;
+        children.system = builtins.listToAttrs (
+          builtins.map (system: {
+            name = system;
+            value = evaluation (
+              baseUnder system configuration
+              // {
+                inherit system;
+                systems = [ system ];
+              }
+            );
+          }) systems
+        );
+        inputs = [ libManifest ] ++ builtins.attrValues configuration.children.system;
+      };
     in
-    view false;
+    if perSystem then configuration else evaluation base;
 
   # Finalize the configuration a top ends with: a top has no parent
   # that declares it under an attribute, so it takes the name the

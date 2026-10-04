@@ -28,33 +28,45 @@ let
   # runs on, and it finalizes the configurations the module returns
   # under `children`, by integration and then name, against the
   # childless manifest.
-  stubIntegration =
-    type: lib: module:
-    lib.caisson-core.mkConfiguration {
-      inherit type;
-      evaluate =
-        { lib, manifest }:
-        let
-          config = module lib;
-        in
-        {
-          value = {
-            inherit config;
-            seenLib = lib;
-          };
-          outputs.marker = config.marker or null;
-          children = builtins.mapAttrs (
-            integration:
-            builtins.mapAttrs (
-              name:
-              lib.caisson-core.finalizeChild {
-                inherit name;
-                parent = manifest.childlessManifest;
-                what = "`children.${integration}.${name}`";
-              }
-            )
-          ) (config.children or { });
-        };
+  stubIntegration = stubIntegrationWith { };
+
+  # The same constructor for an integration that evaluates a
+  # configuration at a system.
+  perSystemStubIntegration = stubIntegrationWith { perSystem = true; };
+
+  stubIntegrationWith =
+    declaration: type: lib: module:
+    lib.caisson-core.mkConfiguration (
+      declaration
+      // {
+        inherit type;
+        evaluate = stubEvaluate module;
+      }
+    );
+
+  stubEvaluate =
+    module:
+    { lib, manifest }:
+    let
+      config = module lib;
+    in
+    {
+      value = {
+        inherit config;
+        seenLib = lib;
+      };
+      outputs.marker = config.marker or null;
+      children = builtins.mapAttrs (
+        integration:
+        builtins.mapAttrs (
+          name:
+          lib.caisson-core.finalizeChild {
+            inherit name;
+            parent = manifest.childlessManifest;
+            what = "`children.${integration}.${name}`";
+          }
+        )
+      ) (config.children or { });
     };
 
   # The pin readers' pure parts, read directly.
@@ -1657,6 +1669,93 @@ let
     # finalizes any other. The `record` of an integration is carried on
     # both views and may not name a field mkConfiguration writes. A top is
     # finalized only under a lib that carries a manifest.
+    # An integration that evaluates a configuration at a system
+    # declares `perSystem`. What is declared is then a configuration
+    # whose children are its evaluations, by system, under
+    # `children.system`: an evaluation for every system in force where
+    # it is declared, also when that is a single system. Each
+    # evaluation is named by its system, carries it as `system` and as
+    # the only entry of `systems`, and has the configuration as its
+    # parent. What it declares beneath itself is finalized against its
+    # childless view.
+    lifecyclePerSystemConfigurationHoldsAnEvaluationPerSystem =
+      let
+        composedWith =
+          systems:
+          core.mkLib {
+            sources = { };
+            name = "probe-project";
+            inherit systems;
+          };
+        configurationOn =
+          composed:
+          composed.caisson-core.finalizeTop (
+            perSystemStubIntegration "machine" composed (lib: {
+              marker = "at ${lib.caisson-core.evalManifest.system}";
+              children.stub.beneath = stubIntegration "stub" lib (lib: {
+                marker = lib.caisson-core.evalManifest.nearest.machine.system;
+              });
+            })
+          );
+        several = configurationOn (composedWith [
+          "x86_64-linux"
+          "aarch64-linux"
+        ]);
+        single = configurationOn (composedWith [ "x86_64-linux" ]);
+        x86 = several.children.system.x86_64-linux;
+        beneath = x86.children.stub.beneath;
+      in
+      several.type == "machine"
+      && several.name == "probe-project"
+      && !(several ? value)
+      && builtins.attrNames several.children == [ "system" ]
+      && builtins.attrNames several.children.system == [
+        "aarch64-linux"
+        "x86_64-linux"
+      ]
+      && builtins.length several.inputs == 3
+      && x86.type == "machine"
+      && x86.name == "x86_64-linux"
+      && x86.system == "x86_64-linux"
+      && x86.systems == [ "x86_64-linux" ]
+      && x86.parent.name == "probe-project"
+      && !(x86.parent ? value)
+      && builtins.length x86.ancestors == 2
+      && x86.outputs.marker == "at x86_64-linux"
+      && several.children.system.aarch64-linux.outputs.marker == "at aarch64-linux"
+      && x86.value.seenLib.caisson-core.evalManifest.system == "x86_64-linux"
+      && x86.childlessManifest.childless
+      && x86.childlessManifest.system == "x86_64-linux"
+      && beneath.parent.childless
+      && beneath.parent.system == "x86_64-linux"
+      && beneath.outputs.marker == "x86_64-linux"
+      && beneath.systems == [ "x86_64-linux" ]
+      && builtins.attrNames single.children.system == [ "x86_64-linux" ]
+      && single.children.system.x86_64-linux.outputs.marker == "at x86_64-linux";
+
+    # No system in force is no evaluation: a configuration declared in
+    # a composition that declares no systems, or an empty list, has no
+    # children, and nothing is refused.
+    lifecyclePerSystemConfigurationWithNoSystemHasNoEvaluation =
+      let
+        configurationOn =
+          composed:
+          composed.caisson-core.finalizeTop (
+            perSystemStubIntegration "machine" composed (_lib: throw "evaluated with no system")
+          );
+        undeclared = configurationOn (core.mkLib { sources = { }; });
+        empty = configurationOn (
+          core.mkLib {
+            sources = { };
+            systems = [ ];
+          }
+        );
+      in
+      undeclared.children.system == { }
+      && empty.children.system == { }
+      && builtins.length undeclared.inputs == 1
+      && undeclared.type == "machine";
+
     lifecycleEvaluationIsAConfiguration =
       let
         composed = core.mkLib {

@@ -343,7 +343,8 @@ Only `pkgsManifest` and
 `evalManifest` are accepted, each a manifest or null, and a rebuilt
 lib carries `withManifests` too, keeping what is already filled in.
 
-`caisson-core.mkConfiguration { type; evaluate; record ? { }; }` returns
+`caisson-core.mkConfiguration { type; evaluate; record ? { };
+perSystem ? false; }` returns
 the configuration of a module evaluation, the function of
 `{ name, parent }` above. Nothing is evaluated until the manifest that
 function returns has its `value`, `outputs` or `children` read.
@@ -375,6 +376,23 @@ registries. `caisson-core.finalizeTop configuration` finalizes the
 configuration a top ends with: its name is the name the composition
 declares on `mkLib`, absent when it declares none, and its parent is
 the lib's manifest.
+
+An integration that evaluates a configuration at a system passes
+`perSystem = true`. What is declared is then a configuration with an
+evaluation for every system in force where it is declared, and the
+manifest the configuration returns is the configuration: it carries no
+`value`, and its children, under `children.system`, are its
+evaluations by system. There are as many as there are systems in
+force, also when that is a single system, and none when no system is
+in force; nothing is refused. Each evaluation is a manifest as
+described above, with the childless and full views, named by its
+system, carrying that system as `system` and as the only entry of
+`systems`, with the configuration as its parent. `evaluate` reads the
+system from the manifest it is handed, and what an evaluation declares
+beneath itself is finalized against that evaluation's childless
+manifest. The tree always holds the evaluations by system; leaving the
+system out of a published name where nothing needs it belongs to
+naming, not to the tree.
 
 Every manifest carries
 `_type = "caisson-manifest"`, and `manifestOf` finds it in whatever
