@@ -2,7 +2,7 @@
 #
 # caisson-core, composed from the entries it ships.
 #
-# `compose` below is the one primitive: keyed overlay composition with
+# `compose` below is the primitive: keyed overlay composition with
 # identity, replacement and deterministic order, over plain builtins.
 # Everything else caisson-core exports is an ordinary library overlay
 # under lib-overlays/<name>/default.nix, composed here over the empty
@@ -169,7 +169,7 @@ let
     "pins"
   ];
 
-  # The keyed entries of caisson-core, bound to one composition: the
+  # The keyed entries of caisson-core, bound to a composition: the
   # pinned sources the composition closes over (its `closure-inputs`)
   # and the entries it publishes (the `nixpkgs-lib` entry, in a
   # composition mkLib builds). Each overlay file takes the closure

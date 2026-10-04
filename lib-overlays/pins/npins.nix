@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 #
 # npins' sources.json, read as data, and the fetch each pin needs.
-# The fetches are the ones npins' generated default.nix performs with
+# The fetches are those npins' generated default.nix performs with
 # the builtin fetchers, so a pin read here is the tree npins would
 # give. Only format version 8 is read, the version npins writes and
 # its generated default.nix accepts.

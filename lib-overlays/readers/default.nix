@@ -26,8 +26,9 @@
 # Each returns the function mkLib takes (`lib: { ... }`,
 # `mkLibOverlay: { ... }`, `mkPkgOverlay: { ... }`), so the call sites read
 # `modules = caisson-core.mkModules ./modules;`. An entry is a
-# directory holding a default.nix, a symlink to one included, and
-# anything else in a directory being read is an error: a stray file
+# directory holding a default.nix, a symlink to such a directory
+# included, and anything else in a directory being read is an error:
+# a stray file
 # cannot silently vanish from a registry. The first level of a modules
 # directory is the class, whatever its name, and a class no composed
 # integration declares is an error as well: registering through the
@@ -53,7 +54,7 @@ let
     ) (builtins.readDir dir);
 
   # The entries of `dir`, name -> path: every subdirectory holding a
-  # default.nix; a subdirectory without one throws.
+  # default.nix; a subdirectory without a default.nix throws.
   entriesOf =
     what: dir:
     builtins.mapAttrs (

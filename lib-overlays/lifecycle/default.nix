@@ -233,7 +233,7 @@ let
   # arg list and returns `{ imports ? [ ], overlay }`, the lib overlay
   # entry's shape, with `overlay = final: prev: ...` a nixpkgs overlay.
   # An entry built from a file records the file as its `origin`, the
-  # identity the selection compares when one key is reached twice; an
+  # identity the selection compares when a key is reached twice; an
   # entry built from a function has none. An entry imports a sibling
   # by reading it from the registry of the composition that registered
   # it, `closure-lib.caisson-core.libManifest.pkgOverlays.<name>`,
@@ -293,7 +293,7 @@ let
 
   # Key an entry and its imports for a registry. `keyOf` maps the key an
   # entry carried to the key it has here; an import without a key gets
-  # a synthetic one derived from its importer's key and its position,
+  # a synthetic key derived from its importer's key and its position,
   # so it keeps that position without claiming a name.
   rekeyPkgOverlay =
     keyOf: key: entry:
@@ -315,7 +315,7 @@ let
   # once, where its first occurrence falls. One key reached through two
   # paths is one entry when both carry the same origin (or either carries
   # none, an entry built from a function); two different entries under
-  # one key are refused rather than one silently winning. The result is
+  # one key are refused rather than either silently winning. The result is
   # the list of nixpkgs overlays to hand a package set, in that order.
   pkgOverlaysFor =
     selection:
@@ -449,7 +449,7 @@ let
   # an attrset carrying `caisson.manifest`, an evaluated configuration
   # carrying `config.caisson.manifest`, or a lib (or a package set,
   # through `pkgs.lib`) carrying the phase manifests, where the last
-  # one filled in is the manifest.  Null when the value carries none.
+  # manifest filled in is the manifest.  Null when the value carries none.
   manifestOf =
     value:
     let
@@ -508,7 +508,7 @@ let
             "a ${builtins.typeOf child}"
         }, where a configuration is expected: a function of
         `{ name, parent }` returning a manifest, as an integration's
-        `mkConfiguration` builds one (for a package config,
+        `mkConfiguration` builds it (for a package config,
         `lib.caisson.nixpkgs.mkConfiguration`).
       ''
     else
@@ -567,10 +567,11 @@ let
   # finalized configurations declared beneath, by integration and then
   # name). `record` is plain data the integration adds to the manifest.
   #
-  # The evaluation has two views. Each is a manifest, and each runs on
-  # the lib of the declaration rebuilt with that manifest as
-  # `evalManifest`. The childless view is the evaluation without the
-  # configurations declared beneath it, and it is what those
+  # The evaluation has a childless view and a full view. Each is a
+  # manifest, and each runs on the lib of the declaration rebuilt
+  # with that manifest as `evalManifest`. The childless view is the
+  # evaluation without the configurations declared beneath it, and it
+  # is what those
   # configurations are finalized against: the full manifest carries it
   # as `childlessManifest`, and `evaluate` hands it to `finalizeChild`
   # as the parent of each child. The full view is the manifest
@@ -655,7 +656,7 @@ let
         caisson-core.finalizeTop finalizes a configuration under a
         composition's manifest, but this library carries none at
         `caisson-core.libManifest`. Compose the library with
-        caisson-core.mkLib, which captures one.
+        caisson-core.mkLib, which captures a manifest.
       ''
     else
       finalizeChild {
@@ -677,8 +678,8 @@ let
   # that layer, and where the layer binds the name, from
   # `unsafeGetAttrPos`. A position is kept only when it lies within
   # the layer's origin file; a name a layer computes rather than
-  # writes has no position there, or one inside the library that
-  # computed it, and is reported with the layer's file alone.
+  # writes has no position there, or a position inside the library
+  # that computed it, and is reported with the layer's file alone.
   definers =
     manifest: path:
     let
@@ -926,7 +927,7 @@ let
         rawSystems = resolvedArgs.systems or null;
         rawName = resolvedArgs.name or null;
 
-        # The platforms the tree builds on, declared once here and
+        # The platforms the tree builds on, declared here and
         # read from the manifest by whatever needs a system list
         # before any evaluation names a host platform. Null when the
         # composition declares none.
@@ -941,8 +942,8 @@ let
               `[ "x86_64-linux" ]`), but got a ${builtins.typeOf rawSystems}.
             '';
 
-        # The project's name: the one name the tree holds for itself,
-        # declared once here and read from the manifest. A
+        # The project's name: the name the tree holds for itself,
+        # declared here and read from the manifest. A
         # configuration no parent declares takes it as its name, since
         # a name is otherwise the attribute a parent declares a child
         # under and a parentless evaluation has no such attribute, and
@@ -1084,9 +1085,9 @@ let
         # either; null when nothing declares it.
         nixpkgsLibSource =
           let
-            # The plain function rather than the one in the composed
-            # library: the source decides what the fixpoint holds, so
-            # it cannot be read out of the fixpoint.
+            # The plain function rather than the function in the
+            # composed library: the source decides what the fixpoint
+            # holds, so it cannot be read out of the fixpoint.
             resolve = import ../resolve/resolve.nix;
             fromPart = resolve {
               name = "nixpkgs-lib";
@@ -1105,8 +1106,8 @@ let
         # reachable from an overlay file's closure as `entries.<name>`.
         # They are read back from the registry, so a registration
         # under the same name is what importers get: replacing a
-        # published entry is registering one. (A replacement that
-        # imports the entry it replaces imports itself.)
+        # published entry is registering under its name. (A replacement
+        # that imports the entry it replaces imports itself.)
         publishedEntries = {
           nixpkgs-lib = registeredLibOverlays.nixpkgs-lib;
         };
@@ -1165,7 +1166,7 @@ let
         # the local registrations, a local name winning a collision as in
         # the lib overlay registry. An entry's key is its registry name.
         # Every entry records where it came from in `project`: null for a
-        # local registration, the project's name for a contributed one,
+        # local registration, the project's name for a contributed entry,
         # so an export selector can keep the local entries alone with a
         # filter on that field.
         registeredPkgOverlays =
@@ -1206,16 +1207,17 @@ let
 
         # The registry: the forced entries caisson-core publishes,
         # then consumed projects' overlays, then the local
-        # registrations, prefixed names beside short ones; a later
-        # registration wins a name collision, so a local one beats a
-        # project's and either beats a published one. A registered
-        # overlay's compose key is its registry name here, whatever
+        # registrations, prefixed names beside short names; a later
+        # registration wins a name collision, so a local registration
+        # beats a project's registration and either beats a published
+        # entry. A registered overlay's compose key is its registry
+        # name here, whatever
         # key it carried from the tree that built it (two projects may
         # each export a `default`), so registering under a published
         # name replaces that entry wherever it is composed.
         #
         # Every entry records where it came from in `project`: the
-        # consumed project's name for a contributed one, null for a
+        # consumed project's name for a contributed entry, null for a
         # local registration, and `caisson-core` for the entries
         # caisson-core publishes into every composition, which this
         # composition did not register either. An export selector keeps
@@ -1307,9 +1309,9 @@ let
 
         # Beside the module dictionary, per class and name, the project
         # a registered module came from: null for a local registration
-        # (including one that shadows a project's entry of the same
-        # name), the project's name otherwise. An export selector keeps
-        # the local modules with a filter on this.
+        # (including a registration that shadows a project's entry of
+        # the same name), the project's name otherwise. An export
+        # selector keeps the local modules with a filter on this.
         registeredModuleProjects =
           projectModuleProjects
           // builtins.listToAttrs (
@@ -1320,7 +1322,7 @@ let
             }) (builtins.attrNames modules)
           );
 
-        # The lib is built in four stages, each a new fixpoint over the
+        # The lib is built in stages, each a new fixpoint over the
         # seed, and each carrying a manifest as `libManifest`, so
         # `lib.caisson-core.libManifest` is always the record of
         # the lib being read at the stage that lib is at. Each stage
@@ -1355,10 +1357,11 @@ let
         # are the pinned sources with each pin recorded against the root,
         # `root` is the tree's identity, and `name` is the declared
         # project name, absent when none is declared. The registries are
-        # the registered ones (project entries under `<project>/<name>`,
-        # locals winning a name collision), so export selections drawn
+        # the registered dictionaries (project entries under
+        # `<project>/<name>`, locals winning a name collision), so
+        # export selections drawn
         # from the manifest see project-borne entries exactly like
-        # hand-registered ones; `projects` keeps the raw per-project
+        # hand-registered entries; `projects` keeps the raw per-project
         # capture. Checks belong to the export side (integrations), not
         # here.
         stageManifest = {
@@ -1533,8 +1536,9 @@ let
         # manifest and the given phase manifests filled in. The stage
         # carries `caisson-core.withManifests`, which rebuilds it from
         # the same declaration with more phase manifests filled in: a
-        # new fixpoint, so everything that reads one through the
-        # fixpoint sees it, and not an attribute merge over a built lib.
+        # new fixpoint, so everything that reads a phase manifest
+        # through the fixpoint sees it, and not an attribute merge over
+        # a built lib.
         stage =
           {
             composeArgs,
@@ -1610,7 +1614,7 @@ let
         # no registry entry (a keyless import's synthesized key, or a
         # key an overlay built elsewhere carried in) is an ad hoc
         # entry and marked opaque, as is each keyless entry, which the
-        # composition applies after the keyed ones. The walk is over
+        # composition applies after the keyed entries. The walk is over
         # the selection alone: the registrations and the manifest
         # compose after it as caisson-core's recording, not as
         # entries.
@@ -1635,19 +1639,19 @@ let
         # forced entry under its key, which comes after the entry it
         # replaces, so `definers` names it the winner. The registered
         # stage adds the `modules`, `configs` and `pkgOverlays`
-        # registrations, and the full stage the `pkgSets` ones.
+        # registrations, and the full stage the `pkgSets` registrations.
         #
         # Each event names its manifest (the empty name path: this is
         # the root lib), its type and operation, its key, its index
         # within its operation and its origin, the project that
         # registered it (this project's name for a local entry) and the
-        # file it was built from where one is known. A layer event also
-        # carries the two sides of its overlay call,
+        # file it was built from where that is known. A layer event also
+        # carries the sides of its overlay call,
         # `final: prev: result`, as the stage that recorded it composed
         # them: `result`, the attrset its overlay returned (the names
         # the layer defines, where it binds them and the values they
         # had after it), and `prev`, the accumulation it received,
-        # which tells a name it defines from one it carries over;
+        # which tells a name it defines from a name it carries over;
         # `definers` reads both lazily.
         originOf = entry: {
           project = if (entry.project or null) == null then name else entry.project;
@@ -1838,7 +1842,7 @@ in
       # Seed only: overlay contributions merge in during composition,
       # and mkLib applies the local registrations as a final overlay
       # so the composing flake's entries win over contributed
-      # ones.
+      # entries.
       modules = (prev.caisson-core or { }).modules or { };
       # The class index: per class, the integration that owns it and
       # the mkModule the class registers through. Each integration
@@ -1857,7 +1861,7 @@ in
       # The phase manifests, one per evaluation phase: the lib (filled
       # in by mkLib), the package set (filled in on the lib inside a
       # package set) and the module evaluation (filled in on the lib an
-      # evaluation is built with). All three are present on every
+      # evaluation is built with). All are present on every
       # composed library and null until filled in.
       libManifest = (prev.caisson-core or { }).libManifest or null;
       pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
