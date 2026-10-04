@@ -540,7 +540,7 @@ let
       childless,
       children,
     }:
-    builtins.intersectAttrs inheritedFields parent
+    inheritedFrom parent
     // {
       _type = "caisson-manifest";
       type = "system";
@@ -563,6 +563,7 @@ let
   inheritedFields = {
     configs = null;
     defaultEcosystemSrc = null;
+    defaultModuleImports = null;
     libOverlays = null;
     moduleProjects = null;
     modules = null;
@@ -574,6 +575,38 @@ let
     systems = null;
   };
 
+  # What a manifest beneath `parent` inherits from it: the fields
+  # above, with the module registry and the default selections
+  # extended by what `parent` registered for the configurations
+  # beneath it (`forChildren`). A registration under a name the
+  # registry already holds replaces it beneath `parent`, and a default
+  # is added after those from above. Every level on the way down
+  # extends them in turn, so a registration reaches every
+  # configuration beneath the level that made it, at any depth.
+  inheritedFrom =
+    parent:
+    let
+      given = parent.forChildren or { };
+      modulesAbove = parent.modules or { };
+      defaultsAbove = parent.defaultModuleImports or { };
+    in
+    builtins.intersectAttrs inheritedFields parent
+    // (
+      if parent ? forChildren then
+        {
+          modules =
+            modulesAbove
+            // builtins.mapAttrs (class: names: (modulesAbove.${class} or { }) // names) (given.modules or { });
+          defaultModuleImports =
+            defaultsAbove
+            // builtins.mapAttrs (class: selections: (defaultsAbove.${class} or [ ]) ++ selections) (
+              given.defaultModuleImports or { }
+            );
+        }
+      else
+        { }
+    );
+
   # The fields `mkConfiguration` writes, which an integration's `record`
   # may not name.
   configurationFields = [
@@ -582,6 +615,8 @@ let
     "childless"
     "childlessManifest"
     "children"
+    "defaultModuleImports"
+    "forChildren"
     "inputs"
     "name"
     "nearest"
@@ -605,6 +640,18 @@ let
   # (the integration's references into the value) and `children` (the
   # finalized configurations declared beneath, by integration and then
   # name). `record` is plain data the integration adds to the manifest.
+  #
+  # `evaluate` may also return `forChildren`, what the evaluation
+  # registers for the configurations beneath it: `modules`, by class
+  # and then name, which join the module registry those configurations
+  # see (`caisson-core.modules` of the lib each runs on), and
+  # `defaultModuleImports`, by class a list of selections (functions
+  # of a lib returning modules), which are added to the default
+  # selection of that class beneath. They are read from the childless
+  # view, reach every configuration beneath at any depth, and reach
+  # nothing at the evaluation itself. The manifest of an evaluation
+  # holds the registry it sees as `modules` and the selections added
+  # above it as `defaultModuleImports`.
   #
   # The evaluation has a childless view and a full view. Each is a
   # manifest, and each runs on the lib of the declaration rebuilt
@@ -659,7 +706,7 @@ let
       # `name` beneath `parent`.
       baseUnder =
         parent:
-        builtins.intersectAttrs inheritedFields parent
+        inheritedFrom parent
         // checkedRecord
         // {
           _type = "caisson-manifest";
@@ -751,6 +798,10 @@ let
                   inherit childless children;
                   value = evaluated.value;
                   outputs = evaluated.outputs or { };
+                  forChildren = {
+                    modules = (evaluated.forChildren or { }).modules or { };
+                    defaultModuleImports = (evaluated.forChildren or { }).defaultModuleImports or { };
+                  };
                   inputs =
                     [ libManifest ]
                     ++ (
@@ -1727,16 +1778,40 @@ let
 
         # A stage's manifest enters its lib through composition, as a
         # final overlay setting `libManifest`.
+        #
+        # A lib an evaluation runs on (`evalManifest` filled in) shows
+        # the module registry of that evaluation: the registry of the
+        # composition, with the entries the manifest holds on top,
+        # which are the composition's registrations and what the levels
+        # above the evaluation registered for it.
         manifestOverlay = manifest: extra: {
           imports = [ ];
-          overlay = _final: prev: {
-            caisson-core =
-              (prev.caisson-core or { })
-              // extra
-              // {
-                libManifest = manifest;
-              };
-          };
+          overlay =
+            _final: prev:
+            let
+              evalManifest = extra.evalManifest or null;
+              composed = (prev.caisson-core or { }).modules or { };
+            in
+            {
+              caisson-core =
+                (prev.caisson-core or { })
+                // extra
+                // {
+                  libManifest = manifest;
+                }
+                // (
+                  if evalManifest == null then
+                    { }
+                  else
+                    {
+                      modules =
+                        composed
+                        // builtins.mapAttrs (class: names: (composed.${class} or { }) // names) (
+                          evalManifest.modules or { }
+                        );
+                    }
+                );
+            };
         };
 
         published = builtins.listToAttrs (
