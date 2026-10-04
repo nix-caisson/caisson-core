@@ -397,6 +397,22 @@ force carry on beneath an evaluation, so a configuration declared
 beneath it has a system above it in turn. `finalizeChild` accepts
 either result, a manifest or the evaluations by system.
 
+An evaluation registers modules for the configurations beneath it.
+`evaluate` may return `forChildren` beside `value`, `outputs` and
+`children`: `modules`, by class and then name, and
+`defaultModuleImports`, by class a list of selections, each a function
+of a lib returning modules. They are read from the childless view and
+recorded on the manifest as `forChildren`. A configuration beneath
+inherits the registry and the selections of its parent extended by
+them: its manifest holds the registry it sees as `modules`, where a
+registration under a name already there replaces the entry, and the
+selections added above it as `defaultModuleImports`, those from the
+top first. The lib an evaluation runs on shows that registry as
+`caisson-core.modules`. Every level on the way down extends both in
+turn, so a registration reaches every configuration beneath the level
+that made it, at any depth, and it reaches nothing at that level or
+beside it.
+
 `caisson-core.elide paths` gives, for each of a set of things in a
 tree, the segments needed to tell it apart from the others. A path is
 the list of `{ type, name }` segments from the top down to the thing,

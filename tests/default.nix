@@ -67,6 +67,7 @@ let
           }
         )
       ) (config.children or { });
+      forChildren = config.forChildren or { };
     };
 
   # The pin readers' pure parts, read directly.
@@ -1820,6 +1821,62 @@ let
         "system:x86_64-linux"
         "machine:alpha"
         "system:aarch64-linux"
+      ];
+
+    # What an evaluation registers for the configurations beneath it
+    # joins the module registry they see and the default selection of
+    # the class, at any depth and through a system. It reaches nothing
+    # at the evaluation itself or beside it, and a level beneath
+    # replaces an entry for what is beneath that level.
+    lifecycleRegistrationsReachWhatIsBeneath =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        seen = manifest: manifest.value.seenLib.caisson-core.modules.stub or { };
+        selected =
+          manifest:
+          builtins.concatMap (selection: selection manifest.value.seenLib) (
+            manifest.defaultModuleImports.stub or [ ]
+          );
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "holder" composed (lib: {
+            forChildren.modules.stub.gift = "from the holder";
+            forChildren.modules.stub.other = "also from the holder";
+            forChildren.defaultModuleImports.stub = [ (lib: [ lib.caisson-core.modules.stub.gift ]) ];
+            children.stub.inner = stubIntegration "stub" lib (lib: {
+              forChildren.modules.stub.gift = "from inner";
+              forChildren.defaultModuleImports.stub = [ (lib: [ lib.caisson-core.modules.stub.other ]) ];
+              children.stub.deep = stubIntegration "stub" lib (_lib: { });
+            });
+            children.machine.host = perSystemStubIntegration "machine" lib (_lib: { });
+          })
+        );
+        beside = composed.caisson-core.finalizeTop (stubIntegration "stub" composed (_lib: { }));
+        inner = top.children.stub.inner;
+        deep = inner.children.stub.deep;
+        host = top.children.system.x86_64-linux.children.machine.host;
+      in
+      seen top == { }
+      && seen beside == { }
+      && top.forChildren.modules.stub.gift == "from the holder"
+      && seen inner == {
+        gift = "from the holder";
+        other = "also from the holder";
+      }
+      && inner.modules.stub == seen inner
+      && selected inner == [ "from the holder" ]
+      && seen host == seen inner
+      && selected host == [ "from the holder" ]
+      && seen deep == {
+        gift = "from inner";
+        other = "also from the holder";
+      }
+      && selected deep == [
+        "from inner"
+        "also from the holder"
       ];
 
     # `elide` keeps, of each path, its last segment and the segments
