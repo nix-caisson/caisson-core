@@ -434,9 +434,10 @@ selection of the package set for the configurations beneath: it
 replaces the selection in force at the evaluation for everything
 beneath it, and a configuration beneath that records a selection
 replaces it in turn. Every level on the way down extends both in
-turn, so a registration reaches every configuration beneath the level
-that made it, at any depth, and it reaches nothing at that level or
-beside it.
+turn, so what a level gives is inherited by the configurations beneath
+it, nested ones included, until a level between replaces it. The level
+that gives it and the configurations beside that level do not inherit
+it.
 
 `caisson-core.elide paths` gives, for each of a set of things in a
 tree, the segments needed to tell it apart from the others. A path is
