@@ -617,6 +617,34 @@ let
           # no parent.
           defaultPkgs =
             if (given.defaultPkgs or null) != null then given.defaultPkgs else parent.defaultPkgs or null;
+          # The systems in force beneath `parent`: the list `parent`
+          # states for the configurations beneath it, else the list
+          # in force at `parent`. A stated list is taken from the
+          # systems in force where `parent` is declared, which for a
+          # configuration evaluated at a system is the list above
+          # that system.
+          systems =
+            let
+              stated = given.systems or null;
+              atSystem = parent ? system && (parent.type or null) != "system";
+              declaredWith = if atSystem then parent.parent.systems or null else parent.systems or null;
+              allowed = if declaredWith == null then [ ] else declaredWith;
+              outside = builtins.filter (system: !(builtins.elem system allowed)) stated;
+            in
+            if stated == null then
+              parent.systems or null
+            else if outside == [ ] then
+              stated
+            else
+              throw ''
+                caisson-core: the ${parent.type or "unknown"} configuration ${
+                  if parent ? name then "`${parent.name}`" else "at the top"
+                } states the systems ${builtins.concatStringsSep ", " stated} for the
+                configurations beneath it (`forChildren.systems`), and ${builtins.concatStringsSep ", " outside}
+                ${if builtins.length outside == 1 then "is" else "are"} not among the systems in force where it is declared (${
+                  if allowed == [ ] then "none" else builtins.concatStringsSep ", " allowed
+                }).
+              '';
         }
       else
         { }
@@ -664,7 +692,9 @@ let
   # of a lib returning modules), which are added to the default
   # selection of that class beneath, and `defaultPkgs`, a selection of
   # the package set in force beneath, null when the evaluation makes
-  # none. They are read from the childless view. The configurations
+  # none, and `systems`, the list of systems in force beneath, null
+  # when the evaluation states none. They are read from the childless
+  # view. The configurations
   # beneath inherit them, nested ones included, and each may replace
   # what it inherits for itself and what is beneath it; the evaluation
   # that gives them does not inherit them. The manifest of an evaluation
@@ -696,9 +726,12 @@ let
   # manifest holds each system under `children.system`, with the
   # evaluations declared at it by integration and then name, beside
   # the configurations that are evaluated once for every system,
-  # which stay under `children.<integration>`. The systems in force
-  # carry on beneath an evaluation, so a configuration declared
-  # beneath it has a system above it in turn.
+  # which stay under `children.<integration>`. Beneath an evaluation
+  # at a system, that system is the one in force, so a configuration
+  # declared there is evaluated at it and has a system above it in
+  # turn. An evaluation that returns `forChildren.systems` puts that
+  # list in force beneath it instead, taken from the systems in force
+  # where it is declared.
   mkConfigurationFor =
     final:
     {
@@ -820,6 +853,7 @@ let
                     modules = (evaluated.forChildren or { }).modules or { };
                     defaultModuleImports = (evaluated.forChildren or { }).defaultModuleImports or { };
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
+                    systems = (evaluated.forChildren or { }).systems or null;
                   };
                   inputs =
                     [ libManifest ]
@@ -840,7 +874,8 @@ let
       # The evaluations of a configuration evaluated at a system: for
       # every system in force where it is declared, the evaluation
       # beneath that system.
-      systems = if (parent.systems or null) == null then [ ] else parent.systems;
+      inForce = (inheritedFrom parent).systems or null;
+      systems = if inForce == null then [ ] else inForce;
       evaluations = builtins.listToAttrs (
         builtins.map (system: {
           name = system;
@@ -852,6 +887,10 @@ let
             })
             // {
               inherit system;
+              # Beneath an evaluation at a system, that system is
+              # the one in force, unless the evaluation states
+              # another list (`forChildren.systems`).
+              systems = [ system ];
             }
           );
         }) systems

@@ -413,10 +413,17 @@ configuration. The parent's full manifest holds each system under
 `children.system`, with the evaluations declared at it by integration
 and then name, beside the configurations evaluated once for every
 system, which stay under `children.<integration>`. An evaluation sees
-the system above it without what is declared under it. The systems in
-force carry on beneath an evaluation, so a configuration declared
-beneath it has a system above it in turn. `finalizeChild` accepts
-either result, a manifest or the evaluations by system.
+the system above it without what is declared under it. Beneath an
+evaluation at a system, that system is the one in force (its
+`systems` is that system alone), so a configuration declared there is
+evaluated at it and has a system above it in turn. An evaluation that
+returns `forChildren.systems` puts that list in force beneath it
+instead: a machine that holds a configuration for another system
+states it there. A configuration evaluated once narrows the list for
+what is beneath it the same way. The list is taken from the systems
+in force where the configuration is declared, and a system outside
+them is refused. `finalizeChild` accepts either result, a manifest or
+the evaluations by system.
 
 An evaluation registers modules for the configurations beneath it.
 `evaluate` may return `forChildren` beside `value`, `outputs` and
