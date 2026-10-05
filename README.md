@@ -429,7 +429,11 @@ them: its manifest holds the registry it sees as `modules`, where a
 registration under a name already there replaces the entry, and the
 selections added above it as `defaultModuleImports`, those from the
 top first. The lib an evaluation runs on shows that registry as
-`caisson-core.modules`. Every level on the way down extends both in
+`caisson-core.modules`. `forChildren` may also hold `defaultPkgs`, a
+selection of the package set for the configurations beneath: it
+replaces the selection in force at the evaluation for everything
+beneath it, and a configuration beneath that records a selection
+replaces it in turn. Every level on the way down extends both in
 turn, so a registration reaches every configuration beneath the level
 that made it, at any depth, and it reaches nothing at that level or
 beside it.

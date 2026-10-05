@@ -586,7 +586,10 @@ let
   # extended by what `parent` registered for the configurations
   # beneath it (`forChildren`). A registration under a name the
   # registry already holds replaces it beneath `parent`, and a default
-  # is added after those from above. Every level on the way down
+  # is added after those from above. A `defaultPkgs` that `parent`
+  # gives for the configurations beneath it replaces the selection in
+  # force at `parent`, and the selection a configuration beneath
+  # records for itself replaces that in turn. Every level on the way down
   # extends them in turn, so a registration reaches every
   # configuration beneath the level that made it, at any depth.
   inheritedFrom =
@@ -608,6 +611,11 @@ let
             // builtins.mapAttrs (class: selections: (defaultsAbove.${class} or [ ]) ++ selections) (
               given.defaultModuleImports or { }
             );
+          # Always present beneath such a parent, null where nothing
+          # selects: listing the fields of a manifest then evaluates
+          # no parent.
+          defaultPkgs =
+            if (given.defaultPkgs or null) != null then given.defaultPkgs else parent.defaultPkgs or null;
         }
       else
         { }
@@ -653,7 +661,9 @@ let
   # see (`caisson-core.modules` of the lib each runs on), and
   # `defaultModuleImports`, by class a list of selections (functions
   # of a lib returning modules), which are added to the default
-  # selection of that class beneath. They are read from the childless
+  # selection of that class beneath, and `defaultPkgs`, a selection of
+  # the package set in force beneath, null when the evaluation makes
+  # none. They are read from the childless
   # view, reach every configuration beneath at any depth, and reach
   # nothing at the evaluation itself. The manifest of an evaluation
   # holds the registry it sees as `modules` and the selections added
@@ -807,6 +817,7 @@ let
                   forChildren = {
                     modules = (evaluated.forChildren or { }).modules or { };
                     defaultModuleImports = (evaluated.forChildren or { }).defaultModuleImports or { };
+                    defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
                   };
                   inputs =
                     [ libManifest ]
