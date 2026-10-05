@@ -156,7 +156,7 @@ The rest of this section is reference, one topic per heading:
 - what it records: [The manifest](#the-manifest), [History](#history),
   [Phase manifests](#phase-manifests);
 - the tree of configurations: [Configurations](#configurations),
-  [The two views of an evaluation](#the-two-views-of-an-evaluation),
+  [The childless view and the full view](#the-childless-view-and-the-full-view),
   [Configurations evaluated per system](#configurations-evaluated-per-system),
   [What an evaluation gives the configurations inside it](#what-an-evaluation-gives-the-configurations-inside-it),
   [Telling names apart](#telling-names-apart-elide),
@@ -164,7 +164,7 @@ The rest of this section is reference, one topic per heading:
 
 ### Stages
 
-The library is built in four stages. Each is a new fixpoint over the
+The library is built in stages. Each is a new fixpoint over the
 empty seed with a manifest in `caisson-core.libManifest`, and each
 exists because some argument of `mkLib` is a function of it.
 
@@ -484,9 +484,9 @@ returns one:
 Nothing is evaluated until the manifest the function returns has its
 `value`, `outputs` or `children` read.
 
-Two functions call a configuration:
+A configuration is called by `finalizeChild` or `finalizeTop`:
 
-- `finalizeChild { name; parent; } child` calls it with both, after
+- `finalizeChild { name; parent; } child` calls it with them, after
   checking with `builtins.functionArgs` that its pattern names exactly
   `name` and `parent`, and requires a manifest back, or the
   evaluations by system of a per-system configuration.
@@ -495,7 +495,7 @@ Two functions call a configuration:
   absent when it declares none, and its parent is the manifest of the
   lib.
 
-### The two views of an evaluation
+### The childless view and the full view
 
 An evaluation has a childless view and a full view. Each is a
 manifest, and each runs on the declaring lib rebuilt with that
@@ -513,7 +513,7 @@ configuration that declares it. The childless evaluation runs only
 when a child, or a reader of `childlessManifest`, reads its value, so
 a configuration with no children is evaluated once.
 
-Both views carry:
+Each view carries:
 
 - `type`, `name` and `parent`;
 - `ancestors`, the list of the parent with the parent appended;
@@ -536,7 +536,7 @@ is no system. Nothing is refused.
 
 In the tree the system sits above the name:
 
-- Each evaluation is a manifest as described above, with both views,
+- Each evaluation is a manifest as described above, with its views,
   under the name it is declared by, carrying its system as `system`.
 - Its parent is the system, a manifest of type `system` named by the
   system, inside the parent that declares the configuration.
