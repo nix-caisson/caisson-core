@@ -573,7 +573,7 @@ let
     # field of its integration): it is in force for everything beneath
     # that configuration, until a configuration beneath records
     # another.
-    selectPkgs = null;
+    defaultPkgs = null;
     pkgSets = null;
     projects = null;
     root = null;

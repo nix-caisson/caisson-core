@@ -389,10 +389,10 @@ children is evaluated once. Both views carry `type`, `name`, `parent`,
 excepted), `inputs` (the lib's manifest, and on the full view the
 childless manifest and the children) and the parent's `sources`,
 `root`, `systems`, `projects`, `defaultEcosystemSrc`, `pkgSets` and
-registries. A manifest also inherits `selectPkgs`, the selection of
+registries. A manifest also inherits `defaultPkgs`, the selection of
 the package set a configuration runs on, where a configuration above
 it recorded one: an integration records the selection a configuration
-makes (`record.selectPkgs`), and it is in force for everything beneath
+makes (`record.defaultPkgs`), and it is in force for everything beneath
 that configuration until a configuration beneath records another.
 `caisson-core.finalizeTop configuration` finalizes the
 configuration a top ends with: its name is the name the composition

@@ -1848,7 +1848,7 @@ let
           selection: lib: module:
           lib.caisson-core.mkConfiguration {
             type = "stub";
-            record = if selection == null then { } else { selectPkgs = selection; };
+            record = if selection == null then { } else { defaultPkgs = selection; };
             evaluate = stubEvaluate module;
           };
         top = composed.caisson-core.finalizeTop (
@@ -1867,7 +1867,7 @@ let
         );
         assigned = top.children.stub.assigned;
         between = assigned.children.stub.between;
-        selectionOf = manifest: manifest.selectPkgs or null;
+        selectionOf = manifest: manifest.defaultPkgs or null;
       in
       selectionOf top == null
       && selectionOf top.children.stub.beside == null
