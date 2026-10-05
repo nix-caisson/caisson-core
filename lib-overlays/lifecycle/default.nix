@@ -590,8 +590,9 @@ let
   # gives for the configurations beneath it replaces the selection in
   # force at `parent`, and the selection a configuration beneath
   # records for itself replaces that in turn. Every level on the way down
-  # extends them in turn, so a registration reaches every
-  # configuration beneath the level that made it, at any depth.
+  # extends them in turn, so what a level gives is inherited by the
+  # configurations beneath it, nested ones included, until a level
+  # between replaces it.
   inheritedFrom =
     parent:
     let
@@ -663,9 +664,10 @@ let
   # of a lib returning modules), which are added to the default
   # selection of that class beneath, and `defaultPkgs`, a selection of
   # the package set in force beneath, null when the evaluation makes
-  # none. They are read from the childless
-  # view, reach every configuration beneath at any depth, and reach
-  # nothing at the evaluation itself. The manifest of an evaluation
+  # none. They are read from the childless view. The configurations
+  # beneath inherit them, nested ones included, and each may replace
+  # what it inherits for itself and what is beneath it; the evaluation
+  # that gives them does not inherit them. The manifest of an evaluation
   # holds the registry it sees as `modules` and the selections added
   # above it as `defaultModuleImports`.
   #
