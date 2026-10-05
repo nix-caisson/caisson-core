@@ -1683,8 +1683,9 @@ let
     # carries the name it is declared under and its system, and its
     # parent is the system, which sits beneath the parent that
     # declares the configuration. The system above an evaluation holds
-    # the systems in force where the configuration is declared, and at
-    # the evaluation its system is the one in force.
+    # every system the configuration is evaluated for, and the
+    # evaluation holds its one system: what is declared inside it is
+    # evaluated for that system only.
     lifecyclePerSystemConfigurationIsAnEvaluationPerSystem =
       let
         composedWith =
@@ -1736,13 +1737,13 @@ let
       && builtins.attrNames single == [ "x86_64-linux" ]
       && single.x86_64-linux.outputs.marker == "at x86_64-linux";
 
-    # Beneath an evaluation at a system, that system is the one in
-    # force, so a configuration declared there has that evaluation
-    # alone. An evaluation that states a list (`forChildren.systems`)
-    # puts that list in force beneath it instead, taken from the
-    # systems in force where it is declared, and a configuration
-    # evaluated once narrows the list for what is beneath it the same
-    # way. A stated system outside those is refused.
+    # A configuration declared inside one that is evaluated per system
+    # is evaluated for the system of its parent only. A parent that
+    # returns a list (`forChildren.systems`) has its children
+    # evaluated for those systems instead, a configuration evaluated
+    # once narrows what its children are evaluated for the same way,
+    # and a listed system that is not allowed where the parent is
+    # declared is refused.
     lifecycleSystemsInForceBeneathAConfiguration =
       let
         composed = core.mkLib {

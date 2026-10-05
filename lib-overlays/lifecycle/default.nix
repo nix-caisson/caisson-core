@@ -726,12 +726,15 @@ let
   # manifest holds each system under `children.system`, with the
   # evaluations declared at it by integration and then name, beside
   # the configurations that are evaluated once for every system,
-  # which stay under `children.<integration>`. Beneath an evaluation
-  # at a system, that system is the one in force, so a configuration
-  # declared there is evaluated at it and has a system above it in
-  # turn. An evaluation that returns `forChildren.systems` puts that
-  # list in force beneath it instead, taken from the systems in force
-  # where it is declared.
+  # which stay under `children.<integration>`.
+  #
+  # A configuration declared inside one that is evaluated per system
+  # is evaluated for the system of its parent only: a home inside a
+  # machine evaluated for x86_64-linux is evaluated for x86_64-linux,
+  # whatever systems the tree lists. A parent that wants its children
+  # evaluated for other systems returns the list as
+  # `forChildren.systems`, taken from the systems allowed where that
+  # parent is declared.
   mkConfigurationFor =
     final:
     {
@@ -887,9 +890,9 @@ let
             })
             // {
               inherit system;
-              # Beneath an evaluation at a system, that system is
-              # the one in force, unless the evaluation states
-              # another list (`forChildren.systems`).
+              # What is declared inside this evaluation is evaluated
+              # for its system only, unless it returns another list
+              # (`forChildren.systems`).
               systems = [ system ];
             }
           );
