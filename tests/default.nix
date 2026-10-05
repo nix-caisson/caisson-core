@@ -423,7 +423,6 @@ let
         libOverlayImports = true;
         extraLibOverlayImports = true;
         pkgOverlays = true;
-        pkgSet = true;
         pkgSets = true;
       }
       && throws (core.mkLib { sources = [ ]; });
@@ -1053,7 +1052,6 @@ let
         "nearest"
         "parent"
         "pkgOverlays"
-        "pkgSet"
         "pkgSets"
         "projects"
         "root"
@@ -1835,44 +1833,10 @@ let
         "system:aarch64-linux"
       ];
 
-    # The top holds the selection mkLib is given as `pkgSet`, the set
-    # named `default` when it is given none, and every configuration
-    # that records no selection runs on it. A value that is no
-    # function is refused.
-    lifecycleThePkgSetSelectionOfTheTopIsGivenToMkLib =
-      let
-        available = {
-          default = "the default set";
-          stable = "the stable set";
-        };
-        compose =
-          selection:
-          core.mkLib (
-            {
-              sources = { };
-              name = "probe-project";
-            }
-            // selection
-          );
-        beneath =
-          composed:
-          (composed.caisson-core.finalizeTop (
-            stubIntegration "holder" composed (lib: {
-              children.stub.inner = stubIntegration "stub" lib (_lib: { });
-            })
-          )).children.stub.inner;
-        given = compose { pkgSet = sets: sets.stable; };
-      in
-      (compose { }).caisson-core.libManifest.pkgSet available == "the default set"
-      && given.caisson-core.libManifest.pkgSet available == "the stable set"
-      && (beneath given).pkgSet available == "the stable set"
-      && (beneath (compose { })).pkgSet available == "the default set"
-      && throws (compose { pkgSet = "stable"; });
-
-    # The selection a configuration records is in force beneath it, through
-    # levels that record none and through a system, until a
-    # configuration beneath records another. Above and beside the
-    # configuration that records it, the selection of the top stands.
+    # The selection of a package set that a configuration records is
+    # in force beneath it, through levels that record none and through
+    # a system, until a configuration beneath records another. It is
+    # absent above and beside the configuration that records it.
     lifecycleARecordedPkgSetSelectionIsInForceBeneath =
       let
         composed = core.mkLib {
@@ -1880,16 +1844,11 @@ let
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
-        available = {
-          default = "the default set";
-          stable = "the stable set";
-          edge = "the edge set";
-        };
         selecting =
-          name: lib: module:
+          selection: lib: module:
           lib.caisson-core.mkConfiguration {
             type = "stub";
-            record = if name == null then { } else { pkgSet = sets: sets.${name}; };
+            record = if selection == null then { } else { selectPkgs = selection; };
             evaluate = stubEvaluate module;
           };
         top = composed.caisson-core.finalizeTop (
@@ -1908,18 +1867,16 @@ let
         );
         assigned = top.children.stub.assigned;
         between = assigned.children.stub.between;
-        selected = manifest: manifest.pkgSet available;
+        selectionOf = manifest: manifest.selectPkgs or null;
       in
-      selected composed.caisson-core.libManifest == "the default set"
-      && selected top == "the default set"
-      && selected top.children.stub.beside == "the default set"
-      && selected assigned == "the stable set"
-      && selected between == "the stable set"
-      && selected between.children.stub.deep == "the stable set"
-      && selected assigned.children.system.x86_64-linux.children.machine.host == "the stable set"
-      && selected between.children.stub.other == "the edge set"
-      && selected between.children.stub.other.children.stub.below == "the edge set"
-      && throws (top.pkgSet { stable = "the stable set"; });
+      selectionOf top == null
+      && selectionOf top.children.stub.beside == null
+      && selectionOf assigned == "stable"
+      && selectionOf between == "stable"
+      && selectionOf between.children.stub.deep == "stable"
+      && selectionOf assigned.children.system.x86_64-linux.children.machine.host == "stable"
+      && selectionOf between.children.stub.other == "edge"
+      && selectionOf between.children.stub.other.children.stub.below == "edge";
 
     # What an evaluation registers for the configurations beneath it
     # joins the module registry they see and the default selection of

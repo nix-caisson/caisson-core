@@ -127,10 +127,6 @@ core.mkLib {
   pkgSets = lib: { };                 # package configs by config name, each
                                       # an integration's mkConfiguration
                                       # call, given the registered lib
-  pkgSet = pkgSets: pkgSets.default;  # the package set selection at the
-                                      # top of the tree, a function of the
-                                      # sets available to a configuration;
-                                      # this is the default
   projects = { };                     # consumed upstream contributions,
                                       # by project name
   systems = [ "x86_64-linux" ];       # the platforms the tree builds on;
@@ -393,14 +389,11 @@ children is evaluated once. Both views carry `type`, `name`, `parent`,
 excepted), `inputs` (the lib's manifest, and on the full view the
 childless manifest and the children) and the parent's `sources`,
 `root`, `systems`, `projects`, `defaultEcosystemSrc`, `pkgSets` and
-registries. A manifest also inherits `pkgSet`, the selection of the
-package set a configuration runs on, a function of the package sets
-available to it. The lib's manifest holds the selection of the top:
-`pkgSet` as given to `mkLib`, the set named `default` when it is given
-none. An integration records the selection a
-configuration makes (`record.pkgSet`), and it is in force for
-everything beneath that configuration until a configuration beneath
-records another.
+registries. A manifest also inherits `selectPkgs`, the selection of
+the package set a configuration runs on, where a configuration above
+it recorded one: an integration records the selection a configuration
+makes (`record.selectPkgs`), and it is in force for everything beneath
+that configuration until a configuration beneath records another.
 `caisson-core.finalizeTop configuration` finalizes the
 configuration a top ends with: its name is the name the composition
 declares on `mkLib`, absent when it declares none, and its parent is
