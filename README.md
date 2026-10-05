@@ -156,7 +156,7 @@ The rest of this section is reference, one topic per heading:
 - what it records: [The manifest](#the-manifest), [History](#history),
   [Phase manifests](#phase-manifests);
 - the tree of configurations: [Configurations](#configurations),
-  [The childless view and the full view](#the-childless-view-and-the-full-view),
+  [Evaluating a configuration with and without its children](#evaluating-a-configuration-with-and-without-its-children),
   [Configurations evaluated per system](#configurations-evaluated-per-system),
   [What an evaluation gives the configurations inside it](#what-an-evaluation-gives-the-configurations-inside-it),
   [Telling names apart](#telling-names-apart-elide),
@@ -495,16 +495,19 @@ A configuration is called by `finalizeChild` or `finalizeTop`:
   absent when it declares none, and its parent is the manifest of the
   lib.
 
-### The childless view and the full view
+### Evaluating a configuration with and without its children
 
-An evaluation has a childless view and a full view. Each is a
-manifest, and each runs on the declaring lib rebuilt with that
-manifest as `evalManifest`.
+A configuration that declares children is evaluated with them and,
+separately, without them. Each evaluation has its manifest, and each
+runs on the declaring lib rebuilt with that manifest as
+`evalManifest`.
 
-- The **childless view** (`childless = true`, no `children`) is the
-  evaluation without the configurations declared inside it.
-- The **full view** is the manifest returned. It carries the
-  childless manifest as `childlessManifest`.
+- The **full evaluation** includes the configurations declared inside
+  it. Its manifest is the one `mkConfiguration` returns, and it
+  carries the other as `childlessManifest`.
+- The **childless evaluation** (`childless = true`, no `children`)
+  leaves them out. It is what the children are built against, so what
+  a child reads of its parent does not depend on the children.
 
 An integration finalizes each child against the childless manifest
 (`finalizeChild { inherit name; parent = manifest.childlessManifest; }`),
@@ -513,13 +516,13 @@ configuration that declares it. The childless evaluation runs only
 when a child, or a reader of `childlessManifest`, reads its value, so
 a configuration with no children is evaluated once.
 
-Each view carries:
+Each of these manifests carries:
 
 - `type`, `name` and `parent`;
 - `ancestors`, the list of the parent with the parent appended;
 - `nearest`, the attribute set of the parent with the parent under
   its integration, a lib excepted;
-- `inputs`, the manifest of the lib, and on the full view the
+- `inputs`, the manifest of the lib, and on the full manifest the
   childless manifest and the children;
 - from the parent: `sources`, `root`, `systems`, `projects`,
   `defaultEcosystemSrc`, `pkgSets` and the registries;
@@ -536,8 +539,9 @@ is no system. Nothing is refused.
 
 In the tree the system sits above the name:
 
-- Each evaluation is a manifest as described above, with its views,
-  under the name it is declared by, carrying its system as `system`.
+- Each evaluation is a manifest as described above, evaluated with
+  and without its children, under the name it is declared by,
+  carrying its system as `system`.
 - Its parent is the system, a manifest of type `system` named by the
   system, inside the parent that declares the configuration.
 - The full manifest of that parent holds each system under
@@ -564,8 +568,8 @@ where it is declared:
 ### What an evaluation gives the configurations inside it
 
 `evaluate` may return `forChildren` beside `value`, `outputs` and
-`children`. It is read from the childless view and recorded on the
-manifest as `forChildren`.
+`children`. It is read from the childless evaluation and recorded on
+the manifest as `forChildren`.
 
 | Field | What it gives the configurations inside |
 | --- | --- |
