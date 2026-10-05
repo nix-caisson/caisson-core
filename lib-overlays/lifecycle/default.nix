@@ -1156,12 +1156,14 @@ let
       # Nothing here interprets them; they are recorded in the full
       # manifest's `pkgSets`.
       pkgSets ? null,
-      # `pkgSets: <set>`: the selection of the package set a
-      # configuration runs on, as it stands at the top of the tree, a
-      # function of the package sets available to a configuration
-      # (`pkgSets: pkgSets.stable`). The set named `default` when
-      # absent. It is in force for every configuration until one
-      # records another.
+      # The selection of the package set a configuration runs on, as it
+      # stands at the top of the tree. It is a function that receives
+      # the package sets available to a configuration, as an attribute
+      # set by package config name, and returns the set to run on:
+      # `pkgSet = pkgSets: pkgSets.stable;` selects the set of the
+      # package config named `stable`. When absent it returns the set
+      # named `default`. It is in force for every configuration until
+      # one records another.
       pkgSet ? null,
     }@resolvedArgs:
     (
@@ -1265,8 +1267,10 @@ let
           else
             throw ''
               mkLib expects `pkgSet` to be a function of the available package
-              sets returning the set to run on (`pkgSets: pkgSets.stable`), but
-              got a ${builtins.typeOf rawPkgSet}.
+              sets returning the set to run on, but got a
+              ${builtins.typeOf rawPkgSet}. For example,
+              `pkgSet = pkgSets: pkgSets.stable;` selects the set of the package
+              config named `stable`.
             '';
         rawLibOverlayImports = given "libOverlayImports" (
           lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays publishedNames)
