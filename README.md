@@ -389,7 +389,12 @@ children is evaluated once. Both views carry `type`, `name`, `parent`,
 excepted), `inputs` (the lib's manifest, and on the full view the
 childless manifest and the children) and the parent's `sources`,
 `root`, `systems`, `projects`, `defaultEcosystemSrc`, `pkgSets` and
-registries. `caisson-core.finalizeTop configuration` finalizes the
+registries. A manifest also inherits `defaultPkgs`, the selection of
+the package set a configuration runs on, where a configuration above
+it recorded one: an integration records the selection a configuration
+makes (`record.defaultPkgs`), and it is in force for everything beneath
+that configuration until a configuration beneath records another.
+`caisson-core.finalizeTop configuration` finalizes the
 configuration a top ends with: its name is the name the composition
 declares on `mkLib`, absent when it declares none, and its parent is
 the lib's manifest.
@@ -424,7 +429,11 @@ them: its manifest holds the registry it sees as `modules`, where a
 registration under a name already there replaces the entry, and the
 selections added above it as `defaultModuleImports`, those from the
 top first. The lib an evaluation runs on shows that registry as
-`caisson-core.modules`. Every level on the way down extends both in
+`caisson-core.modules`. `forChildren` may also hold `defaultPkgs`, a
+selection of the package set for the configurations beneath: it
+replaces the selection in force at the evaluation for everything
+beneath it, and a configuration beneath that records a selection
+replaces it in turn. Every level on the way down extends both in
 turn, so a registration reaches every configuration beneath the level
 that made it, at any depth, and it reaches nothing at that level or
 beside it.

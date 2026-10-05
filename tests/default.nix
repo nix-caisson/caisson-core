@@ -1833,6 +1833,94 @@ let
         "system:aarch64-linux"
       ];
 
+    # The selection of a package set that a configuration records is
+    # in force beneath it, through levels that record none and through
+    # a system, until a configuration beneath records another. It is
+    # absent above and beside the configuration that records it.
+    lifecycleARecordedPkgSetSelectionIsInForceBeneath =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        selecting =
+          selection: lib: module:
+          lib.caisson-core.mkConfiguration {
+            type = "stub";
+            record = if selection == null then { } else { defaultPkgs = selection; };
+            evaluate = stubEvaluate module;
+          };
+        top = composed.caisson-core.finalizeTop (
+          selecting null composed (lib: {
+            children.stub.assigned = selecting "stable" lib (lib: {
+              children.stub.between = selecting null lib (lib: {
+                children.stub.deep = selecting null lib (_lib: { });
+                children.stub.other = selecting "edge" lib (lib: {
+                  children.stub.below = selecting null lib (_lib: { });
+                });
+              });
+              children.machine.host = perSystemStubIntegration "machine" lib (_lib: { });
+            });
+            children.stub.beside = selecting null lib (_lib: { });
+          })
+        );
+        assigned = top.children.stub.assigned;
+        between = assigned.children.stub.between;
+        selectionOf = manifest: manifest.defaultPkgs or null;
+      in
+      selectionOf top == null
+      && selectionOf top.children.stub.beside == null
+      && selectionOf assigned == "stable"
+      && selectionOf between == "stable"
+      && selectionOf between.children.stub.deep == "stable"
+      && selectionOf assigned.children.system.x86_64-linux.children.machine.host == "stable"
+      && selectionOf between.children.stub.other == "edge"
+      && selectionOf between.children.stub.other.children.stub.below == "edge";
+
+    # An evaluation gives a selection for the configurations beneath
+    # it (`forChildren.defaultPkgs`): it is in force beneath, at any
+    # depth and through a system, until a configuration beneath records
+    # another, and the evaluation itself keeps the selection in force
+    # at it.
+    lifecycleAPkgSetSelectionIsGivenForWhatIsBeneath =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        selecting =
+          selection: lib: module:
+          lib.caisson-core.mkConfiguration {
+            type = "stub";
+            record = if selection == null then { } else { defaultPkgs = selection; };
+            evaluate = stubEvaluate module;
+          };
+        top = composed.caisson-core.finalizeTop (
+          selecting null composed (lib: {
+            children.stub.giving = selecting "stable" lib (lib: {
+              forChildren.defaultPkgs = "edge";
+              children.stub.inner = selecting null lib (lib: {
+                children.stub.deep = selecting null lib (_lib: { });
+              });
+              children.stub.recording = selecting "other" lib (_lib: { });
+              children.machine.host = perSystemStubIntegration "machine" lib (_lib: { });
+            });
+            children.stub.beside = selecting null lib (_lib: { });
+          })
+        );
+        giving = top.children.stub.giving;
+        selectionOf = manifest: manifest.defaultPkgs or null;
+      in
+      selectionOf top == null
+      && selectionOf top.children.stub.beside == null
+      && selectionOf giving == "stable"
+      && selectionOf giving.children.stub.inner == "edge"
+      && selectionOf giving.children.stub.inner.children.stub.deep == "edge"
+      && selectionOf giving.children.system.x86_64-linux.children.machine.host == "edge"
+      && selectionOf giving.children.stub.recording == "other";
+
     # What an evaluation registers for the configurations beneath it
     # joins the module registry they see and the default selection of
     # the class, at any depth and through a system. It reaches nothing
