@@ -569,9 +569,10 @@ let
     modules = null;
     pkgOverlays = null;
     # The selection of the package set a configuration runs on, a
-    # function of the package sets available to it. The top starts
-    # with the set named `default`, and a configuration records
-    # another through the `record` of its integration: a selection is
+    # function of the package sets available to it. The top holds the
+    # selection mkLib is given as `pkgSet`, the set named `default`
+    # when it is given none, and a configuration records another
+    # through the `record` of its integration: a selection is
     # in force for everything beneath the configuration that records
     # it, until a configuration beneath records another.
     pkgSet = null;
@@ -1155,6 +1156,13 @@ let
       # Nothing here interprets them; they are recorded in the full
       # manifest's `pkgSets`.
       pkgSets ? null,
+      # `pkgSets: <set>`: the selection of the package set a
+      # configuration runs on, as it stands at the top of the tree, a
+      # function of the package sets available to a configuration
+      # (`pkgSets: pkgSets.stable`). The set named `default` when
+      # absent. It is in force for every configuration until one
+      # records another.
+      pkgSet ? null,
     }@resolvedArgs:
     (
       let
@@ -1237,6 +1245,29 @@ let
         rawLibOverlays = given "libOverlays" (_lib: { });
         rawPkgOverlays = given "pkgOverlays" (_lib: { });
         rawPkgSets = given "pkgSets" (_lib: { });
+        rawPkgSet = given "pkgSet" (
+          available:
+          available.default or (throw ''
+            caisson-core: the package set named `default` is selected at the top of
+            the tree, and the package sets available here are ${
+              if available == { } then "none" else builtins.concatStringsSep ", " (builtins.attrNames available)
+            }. Declare a package config named `default` with `pkgSets` on mkLib,
+            select another set for the tree with `pkgSet` on mkLib, or select
+            another where the configuration is constructed
+            (`pkgSet = pkgSets: pkgSets.<name>;`).
+          '')
+        );
+        # The selection at the top: `pkgSet` as given, else the set
+        # named `default`.
+        pkgSet =
+          if builtins.isFunction rawPkgSet then
+            rawPkgSet
+          else
+            throw ''
+              mkLib expects `pkgSet` to be a function of the available package
+              sets returning the set to run on (`pkgSets: pkgSets.stable`), but
+              got a ${builtins.typeOf rawPkgSet}.
+            '';
         rawLibOverlayImports = given "libOverlayImports" (
           lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays publishedNames)
         );
@@ -1753,22 +1784,10 @@ let
           moduleProjects = registeredModuleProjects;
           pkgOverlays = registeredPkgOverlays;
           # The selection of the package set a configuration runs on,
-          # as it stands at the top: the set named `default`, of the
-          # sets available to the configuration. It is in force for the
-          # whole tree until a configuration records another.
-          pkgSet =
-            available:
-            available.default or (throw ''
-              caisson-core: the package set named `default` is selected at the top of
-              the tree, and the package sets available here are ${
-                if available == { } then
-                  "none"
-                else
-                  builtins.concatStringsSep ", " (builtins.attrNames available)
-              }. Declare a package config named `default` with `pkgSets` on mkLib, or
-              select another set where the configuration is constructed
-              (`pkgSet = pkgSets: pkgSets.<name>;`).
-            '');
+          # as it stands at the top: `pkgSet` as given to mkLib, the
+          # set named `default` when it is given none. It is in force
+          # for the whole tree until a configuration records another.
+          inherit pkgSet;
         };
 
         # The package configs, declared in the lib phase so that every
@@ -2192,6 +2211,7 @@ let
         (builtins.isFunction rawExtraLibOverlayImports || extraLibOverlayImports)
         (builtins.isFunction rawPkgOverlays || localPkgOverlays)
         (builtins.isFunction rawPkgSets || pkgSets)
+        (builtins.isFunction rawPkgSet || pkgSet)
         (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
         (builtins.isAttrs rawProjects || projects)
         (rawSystems == null || builtins.isList rawSystems || systems)

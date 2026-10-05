@@ -423,6 +423,7 @@ let
         libOverlayImports = true;
         extraLibOverlayImports = true;
         pkgOverlays = true;
+        pkgSet = true;
         pkgSets = true;
       }
       && throws (core.mkLib { sources = [ ]; });
@@ -1834,8 +1835,41 @@ let
         "system:aarch64-linux"
       ];
 
-    # The top selects the package set named `default`, and the
-    # selection a configuration records is in force beneath it, through
+    # The top holds the selection mkLib is given as `pkgSet`, the set
+    # named `default` when it is given none, and every configuration
+    # that records no selection runs on it. A value that is no
+    # function is refused.
+    lifecycleThePkgSetSelectionOfTheTopIsGivenToMkLib =
+      let
+        available = {
+          default = "the default set";
+          stable = "the stable set";
+        };
+        compose =
+          selection:
+          core.mkLib (
+            {
+              sources = { };
+              name = "probe-project";
+            }
+            // selection
+          );
+        beneath =
+          composed:
+          (composed.caisson-core.finalizeTop (
+            stubIntegration "holder" composed (lib: {
+              children.stub.inner = stubIntegration "stub" lib (_lib: { });
+            })
+          )).children.stub.inner;
+        given = compose { pkgSet = sets: sets.stable; };
+      in
+      (compose { }).caisson-core.libManifest.pkgSet available == "the default set"
+      && given.caisson-core.libManifest.pkgSet available == "the stable set"
+      && (beneath given).pkgSet available == "the stable set"
+      && (beneath (compose { })).pkgSet available == "the default set"
+      && throws (compose { pkgSet = "stable"; });
+
+    # The selection a configuration records is in force beneath it, through
     # levels that record none and through a system, until a
     # configuration beneath records another. Above and beside the
     # configuration that records it, the selection of the top stands.
