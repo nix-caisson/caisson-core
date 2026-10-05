@@ -1682,8 +1682,10 @@ let
     # there are systems, also for a single system. Each evaluation
     # carries the name it is declared under and its system, and its
     # parent is the system, which sits beneath the parent that
-    # declares the configuration. The systems in force carry on
-    # beneath an evaluation.
+    # declares the configuration. The system above an evaluation holds
+    # every system the configuration is evaluated for, and the
+    # evaluation holds its one system, the default for what is
+    # declared inside it.
     lifecyclePerSystemConfigurationIsAnEvaluationPerSystem =
       let
         composedWith =
@@ -1716,7 +1718,8 @@ let
       && x86.type == "machine"
       && x86.name == "probe-project"
       && x86.system == "x86_64-linux"
-      && x86.systems == both
+      && x86.systems == [ "x86_64-linux" ]
+      && x86.parent.systems == both
       && x86.parent.type == "system"
       && x86.parent.name == "x86_64-linux"
       && x86.parent.childless
@@ -1733,6 +1736,85 @@ let
       && x86.childlessManifest.system == "x86_64-linux"
       && builtins.attrNames single == [ "x86_64-linux" ]
       && single.x86_64-linux.outputs.marker == "at x86_64-linux";
+
+    # Where a configuration that is evaluated per system is declared
+    # inside another, it is evaluated for the system of its parent by
+    # default. A parent that returns a list (`forChildren.systems`)
+    # has such children evaluated for those systems instead, a
+    # configuration evaluated
+    # once narrows what its children are evaluated for the same way,
+    # and a listed system that is not allowed where the parent is
+    # declared is refused.
+    lifecycleSystemsInForceBeneathAConfiguration =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [
+            "x86_64-linux"
+            "aarch64-linux"
+            "riscv64-linux"
+          ];
+        };
+        machine =
+          lib: module:
+          perSystemStubIntegration "machine" lib (
+            lib:
+            {
+              marker = lib.caisson-core.evalManifest.system;
+            }
+            // module lib
+          );
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "holder" composed (lib: {
+            children.machine.plain = machine lib (lib: {
+              children.machine.home = machine lib (_lib: { });
+            });
+            children.machine.serving = machine lib (lib: {
+              forChildren.systems = [ "aarch64-linux" ];
+              children.machine.image = machine lib (_lib: { });
+            });
+            children.machine.outside = machine lib (lib: {
+              forChildren.systems = [ "powerpc64le-linux" ];
+              children.machine.image = machine lib (_lib: { });
+            });
+            children.stub.narrowing = stubIntegration "stub" lib (lib: {
+              forChildren.systems = [
+                "x86_64-linux"
+                "riscv64-linux"
+              ];
+              children.machine.inner = machine lib (_lib: { });
+              children.stub.quiet = stubIntegration "stub" lib (_lib: { });
+            });
+          })
+        );
+        x86 = top.children.system.x86_64-linux.children.machine;
+        narrowing = top.children.stub.narrowing;
+      in
+      builtins.attrNames top.children.system == [
+        "aarch64-linux"
+        "riscv64-linux"
+        "x86_64-linux"
+      ]
+      && builtins.attrNames x86.plain.children.system == [ "x86_64-linux" ]
+      && x86.plain.children.system.x86_64-linux.children.machine.home.outputs.marker == "x86_64-linux"
+      && builtins.attrNames x86.serving.children.system == [ "aarch64-linux" ]
+      && x86.serving.children.system.aarch64-linux.children.machine.image.outputs.marker == "aarch64-linux"
+      && x86.serving.systems == [ "x86_64-linux" ]
+      && throws (builtins.attrNames x86.outside.children.system)
+      && builtins.attrNames narrowing.children.system == [
+        "riscv64-linux"
+        "x86_64-linux"
+      ]
+      && narrowing.systems == [
+        "x86_64-linux"
+        "aarch64-linux"
+        "riscv64-linux"
+      ]
+      && narrowing.children.stub.quiet.systems == [
+        "x86_64-linux"
+        "riscv64-linux"
+      ];
 
     # No system in force is no evaluation: a configuration declared in
     # a composition that declares no systems, or an empty list,
@@ -1761,7 +1843,9 @@ let
     # evaluation sees the system above it without what is declared
     # under it. A configuration declared beneath an evaluation has a
     # system above it in turn, so a system appears on a path as often
-    # as a per-system configuration does.
+    # as a per-system configuration does. Here `alpha` states both
+    # systems for what is beneath it, so its `image` is evaluated at
+    # each.
     lifecycleParentHoldsEvaluationsUnderTheirSystem =
       let
         composed = core.mkLib {
@@ -1773,16 +1857,25 @@ let
           ];
         };
         machine =
-          lib: marker: children:
-          perSystemStubIntegration "machine" lib (lib: {
-            marker = "${marker} at ${lib.caisson-core.evalManifest.system}";
-            children = children lib;
-          });
+          lib: marker: rest:
+          perSystemStubIntegration "machine" lib (
+            lib:
+            {
+              marker = "${marker} at ${lib.caisson-core.evalManifest.system}";
+            }
+            // rest lib
+          );
         top = composed.caisson-core.finalizeTop (
           stubIntegration "holder" composed (lib: {
             marker = "holder";
             children.machine.alpha = machine lib "alpha" (lib: {
-              machine.image = machine lib "image on ${lib.caisson-core.evalManifest.system}" (_lib: { });
+              forChildren.systems = [
+                "x86_64-linux"
+                "aarch64-linux"
+              ];
+              children.machine.image = machine lib "image on ${lib.caisson-core.evalManifest.system}" (
+                _lib: { }
+              );
             });
             children.machine.beta = machine lib "beta" (_lib: { });
             children.stub.plain = stubIntegration "stub" lib (_lib: {

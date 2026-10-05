@@ -413,10 +413,23 @@ configuration. The parent's full manifest holds each system under
 `children.system`, with the evaluations declared at it by integration
 and then name, beside the configurations evaluated once for every
 system, which stay under `children.<integration>`. An evaluation sees
-the system above it without what is declared under it. The systems in
-force carry on beneath an evaluation, so a configuration declared
-beneath it has a system above it in turn. `finalizeChild` accepts
-either result, a manifest or the evaluations by system.
+the system above it without what is declared under it.
+
+Where a configuration that is evaluated per system is declared inside
+another, the system of its parent is the default. A home declared
+inside a machine has, by default, one evaluation per evaluation of the
+machine, for the same system; the manifest of each machine evaluation
+holds that one system as `systems`. A parent changes this by
+returning `forChildren.systems`, the systems its per-system children
+are evaluated for: a machine that holds an image for another
+architecture states that architecture there. A configuration that is
+evaluated once can return a list the same way, to narrow what its
+children are evaluated for. The list has to come from the systems
+allowed where that parent is declared, and a system outside them is
+refused.
+
+`finalizeChild` accepts either result, a manifest or the evaluations
+by system.
 
 An evaluation registers modules for the configurations beneath it.
 `evaluate` may return `forChildren` beside `value`, `outputs` and
