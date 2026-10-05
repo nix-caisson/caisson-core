@@ -1684,8 +1684,8 @@ let
     # parent is the system, which sits beneath the parent that
     # declares the configuration. The system above an evaluation holds
     # every system the configuration is evaluated for, and the
-    # evaluation holds its one system: what is declared inside it is
-    # evaluated for that system only.
+    # evaluation holds its one system, the default for what is
+    # declared inside it.
     lifecyclePerSystemConfigurationIsAnEvaluationPerSystem =
       let
         composedWith =
@@ -1737,10 +1737,11 @@ let
       && builtins.attrNames single == [ "x86_64-linux" ]
       && single.x86_64-linux.outputs.marker == "at x86_64-linux";
 
-    # A configuration declared inside one that is evaluated per system
-    # is evaluated for the system of its parent only. A parent that
-    # returns a list (`forChildren.systems`) has its children
-    # evaluated for those systems instead, a configuration evaluated
+    # Where a configuration that is evaluated per system is declared
+    # inside another, it is evaluated for the system of its parent by
+    # default. A parent that returns a list (`forChildren.systems`)
+    # has such children evaluated for those systems instead, a
+    # configuration evaluated
     # once narrows what its children are evaluated for the same way,
     # and a listed system that is not allowed where the parent is
     # declared is refused.

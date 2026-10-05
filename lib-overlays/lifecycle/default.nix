@@ -728,13 +728,13 @@ let
   # the configurations that are evaluated once for every system,
   # which stay under `children.<integration>`.
   #
-  # A configuration declared inside one that is evaluated per system
-  # is evaluated for the system of its parent only: a home inside a
-  # machine evaluated for x86_64-linux is evaluated for x86_64-linux,
-  # whatever systems the tree lists. A parent that wants its children
-  # evaluated for other systems returns the list as
-  # `forChildren.systems`, taken from the systems allowed where that
-  # parent is declared.
+  # Where a configuration that is evaluated per system is declared
+  # inside another, the system of its parent is the default: a home
+  # inside a machine evaluated for x86_64-linux is evaluated for
+  # x86_64-linux, unless the machine says otherwise. A parent says
+  # otherwise by returning `forChildren.systems`, the systems its
+  # per-system children are evaluated for, taken from the systems
+  # allowed where that parent is declared.
   mkConfigurationFor =
     final:
     {
