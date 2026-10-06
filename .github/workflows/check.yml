@@ -24,10 +24,12 @@ jobs:
         run: |
           find lib lib-overlays -name '*.nix' -print0 \
             | xargs -0 -n1 nix-instantiate --parse > /dev/null
-      # A builtin is written `builtins.<name>`, also where Nix puts
-      # the name in the global scope (`import`, `throw`, `toString`,
-      # `map` and the rest), so every free name in the library code is
-      # `builtins`. `true`, `false` and `null` stay bare. The parser's
+      # Nix lets some builtins be written without the `builtins.`
+      # prefix: `import`, `throw`, `toString`, `map` and the others
+      # listed in `names` below. The library code writes the prefix on
+      # those too (`builtins.import`), so `builtins` is the one name it
+      # uses that it does not define. This step refuses a bare use.
+      # `true`, `false` and `null` stay bare. The parser's
       # output has no comments and has interpolations expanded to
       # code, so with string literals removed a bare name is a use.
       - name: qualified-builtins lint
