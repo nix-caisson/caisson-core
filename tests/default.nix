@@ -652,6 +652,59 @@ let
       in
       composed.fromA && composed.fromB;
 
+    # `prev.caisson-core.ecosystemSrc` is the source the composition
+    # being built supplies for an ecosystem: the default it declares,
+    # else the source it pins under that name, else null. An overlay
+    # may decide the names it adds from it, and an entry a project
+    # contributes reads the source of the composition that composes
+    # it, not the source of the project that registered it.
+    lifecycleEcosystemSrcIsTheSourceOfTheComposingComposition =
+      let
+        reader = {
+          imports = [ ];
+          overlay =
+            _final: prev:
+            let
+              supplied = prev.caisson-core.ecosystemSrc;
+            in
+            {
+              ${"from-${supplied "probe"}"} = true;
+              probeSources = builtins.map supplied [
+                "probe"
+                "pinned"
+                "absent"
+              ];
+            };
+        };
+        project = core.mkLib {
+          sources = { };
+          defaultEcosystemSrc.probe = "project";
+          libOverlays = _lib: { inherit reader; };
+        };
+        consumer = core.mkLib {
+          sources.pinned = "consumer-pin";
+          sources.probe = "shadowed";
+          defaultEcosystemSrc.probe = "consumer";
+          projects.dep.libOverlays = {
+            inherit (project.caisson-core.libManifest.libOverlays) reader;
+          };
+        };
+      in
+      project.from-project
+      && project.probeSources == [
+        "project"
+        null
+        null
+      ]
+      && consumer.from-consumer
+      && !(consumer ? from-project)
+      && consumer.probeSources == [
+        "consumer"
+        "consumer-pin"
+        null
+      ]
+      && consumer.caisson-core.ecosystemSrc "probe" == "consumer";
+
     # Registering under a published name replaces the entry for every
     # importer.
     lifecycleRegistrationReplacesThePublishedEntry =

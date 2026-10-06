@@ -223,6 +223,11 @@ The composed library carries, under `caisson-core`: `mkLib`,
 registry, the class index `classes`, the phase manifests
 (`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
 `definers`, `finalizeChild`, `mkConfiguration`, `finalizeTop`, `elide`,
+`ecosystemSrc` (the source the composition supplies for an ecosystem,
+by exact name: the default it declares, else the source it pins under
+that name, else null; an overlay composed after caisson-core may read
+it from `prev`, and then gets the source of the composition it is
+composed into),
 the lib
 overlay registry view
 `nixpkgs-lib.overlays` (the manifest's `libOverlays`, which a

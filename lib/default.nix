@@ -181,6 +181,8 @@ let
     {
       sources ? { },
       entries ? { },
+      # The default source per ecosystem the composition declares.
+      defaultEcosystemSrc ? { },
     }:
     builtins.listToAttrs (
       builtins.map (
@@ -190,7 +192,12 @@ let
           file = ../lib-overlays + "/${name}";
           applied = builtins.import file {
             closure-inputs = sources;
-            inherit entries compose coreEntries;
+            inherit
+              entries
+              compose
+              coreEntries
+              defaultEcosystemSrc
+              ;
           };
         in
         {

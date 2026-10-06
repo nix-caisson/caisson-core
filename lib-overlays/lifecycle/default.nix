@@ -28,9 +28,28 @@
   entries,
   compose,
   coreEntries,
+  # The default source per ecosystem that the composition these
+  # entries are made for declares.
+  defaultEcosystemSrc ? { },
   ...
 }:
 let
+
+  # The source a composition supplies for an ecosystem, by exact name:
+  # the default it declares, else the source it pins under that name,
+  # else null. It is fixed by the arguments of the mkLib call these
+  # entries are made for and reads nothing from the composed library,
+  # so an overlay composed after caisson-core may read it from `prev`
+  # to decide what it adds. An entry a project contributes therefore
+  # gets the source of the composition that composes it, and not the
+  # source of the project that wrote it.
+  ecosystemSrc =
+    name:
+    builtins.import ../resolve/resolve.nix {
+      inherit name;
+      defaults = defaultEcosystemSrc;
+      sources = closure-inputs;
+    };
 
   # Compose registered overlays into a library. The seed is the empty
   # attribute set: nothing is composed over, and everything a library
@@ -129,8 +148,7 @@ let
   # how it is loaded. The entry records that file as its `origin`, as
   # an entry built from a file does, so the manifest points at the
   # code that produced the layer. `closure` is what the file takes:
-  # the pinned sources and declared defaults of a composition, or a
-  # source named outright as `src`.
+  # nothing, or a source named outright as `src`.
   nixpkgsLibFile = ../nixpkgs-lib;
   mkNixpkgsLibEntryWith =
     closure:
@@ -1549,7 +1567,7 @@ let
 
         # caisson-core's entries, bound to this composition.
         coreOverlays = coreEntries {
-          inherit sources;
+          inherit sources defaultEcosystemSrc;
           entries = publishedEntries;
         };
 
@@ -1573,14 +1591,11 @@ let
         registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
           forcedLibOverlays
           // {
-            # Built from this composition's sources and declared
-            # defaults. Its origin is the polyfill file of
+            # It reads its source from the library it is composed
+            # into. Its origin is the polyfill file of
             # caisson-core, which is the project recorded for it.
             nixpkgs-lib =
-              mkNixpkgsLibEntryWith {
-                closure-inputs = sources;
-                inherit defaultEcosystemSrc;
-              }
+              mkNixpkgsLibEntryWith { }
               // {
                 project = "caisson-core";
               };
@@ -2221,6 +2236,7 @@ in
         contributeModules
         coreEntries
         definers
+        ecosystemSrc
         elide
         finalizeChild
         importApply

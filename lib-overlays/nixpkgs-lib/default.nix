@@ -13,15 +13,21 @@
 # The source is, in order:
 #
 #   - `src`, where the caller of `mkNixpkgsLibEntry` names one;
-#   - the composition's `defaultEcosystemSrc.nixpkgs-lib`, else a
-#     pinned source named exactly `nixpkgs-lib`: the library part
-#     declared separately, the nixpkgs.lib mirror or nixpkgs' `lib`
-#     directory;
-#   - the composition's `defaultEcosystemSrc.nixpkgs`, else a pinned
-#     source named exactly `nixpkgs`: a nixpkgs checkout, one pin
-#     supplying every part.
+#   - the source the composition supplies for the ecosystem
+#     `nixpkgs-lib`: the library part declared separately, the
+#     nixpkgs.lib mirror or nixpkgs' `lib` directory;
+#   - the source the composition supplies for the ecosystem `nixpkgs`:
+#     a nixpkgs checkout, one pin supplying every part.
 #
-# With none of them the entry is still made, and it fails where it is
+# What a composition supplies for an ecosystem is read from
+# `prev.caisson-core.ecosystemSrc`, which caisson-core's entries
+# publish from the arguments of the mkLib call they are made for (the
+# declared default, else the pinned source of that exact name). The
+# entry is composed after those entries, so the value is there, and it
+# is the source of the composition this entry is composed into,
+# whichever tree registered the entry.
+#
+# With no source the entry is still made, and it fails where it is
 # composed, naming the declaration: a composition that never composes
 # it needs no nixpkgs.
 #
@@ -35,37 +41,21 @@
 # into every library: it is published under the key `nixpkgs-lib`,
 # an overlay that needs upstream's functions imports it, and a
 # same-key entry replaces it. It uses builtins only.
-{
-  # The pinned sources of the composition.
-  closure-inputs ? { },
-  # The composition's declared default source per ecosystem.
-  defaultEcosystemSrc ? { },
-  ...
-}@closure:
-let
-  resolve = builtins.import ../resolve/resolve.nix;
-
-  named =
-    name:
-    resolve {
-      inherit name;
-      defaults = defaultEcosystemSrc;
-      sources = closure-inputs;
-    };
-
-  src =
-    if closure ? src then
-      closure.src
-    else if named "nixpkgs-lib" != null then
-      named "nixpkgs-lib"
-    else
-      named "nixpkgs";
-in
-{
+closure: {
   imports = [ ];
   overlay =
     _final: prev:
     let
+      # Null for every name in a library caisson-core's entries are
+      # not part of.
+      supplied = (prev.caisson-core or { }).ecosystemSrc or (_name: null);
+      src =
+        if closure ? src then
+          closure.src
+        else if supplied "nixpkgs-lib" != null then
+          supplied "nixpkgs-lib"
+        else
+          supplied "nixpkgs";
       root =
         if src == null then
           builtins.throw ''
