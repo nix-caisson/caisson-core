@@ -36,7 +36,7 @@ let
     else if repository.type == "Forgejo" then
       "${repository.server}/${repository.owner}/${repository.repo}.git"
     else
-      throw "caisson-core: pins.npins: pin `${name}` names a repository of type `${repository.type}`, which is not supported";
+      builtins.throw "caisson-core: pins.npins: pin `${name}` names a repository of type `${repository.type}`, which is not supported";
 
   # One descriptor per pin:
   #
@@ -52,7 +52,7 @@ let
   describePin =
     name: spec:
     let
-      type = spec.type or (throw "caisson-core: pins.npins: pin `${name}` has no type");
+      type = spec.type or (builtins.throw "caisson-core: pins.npins: pin `${name}` has no type");
       tree = fetch: {
         narHash = toSri spec.hash;
         inherit fetch;
@@ -127,7 +127,7 @@ let
         }
         // file spec.url
       else
-        throw ''
+        builtins.throw ''
           caisson-core: pins.npins: pin `${name}` is of type `${type}`, which the
           builtin fetchers cannot produce (the supported types are Git,
           GitRelease, Channel, Url, MutableUrl and PyPi).
@@ -139,9 +139,9 @@ let
     if (data.version or null) == supportedVersion then
       builtins.mapAttrs describePin (data.pins or { })
     else
-      throw ''
+      builtins.throw ''
         caisson-core: ${what} reads an npins sources.json of format version
-        ${toString (data.version or "none")}, and only version ${toString supportedVersion} is supported.
+        ${builtins.toString (data.version or "none")}, and only version ${builtins.toString supportedVersion} is supported.
         Run `npins upgrade`.
       '';
 

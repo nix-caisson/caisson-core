@@ -9,7 +9,7 @@
 { ... }:
 let
 
-  callFlake = import ./call-flake.nix;
+  callFlake = builtins.import ./call-flake.nix;
 
   # Evaluate a consumer-style flake from source with explicitly
   # supplied inputs. The flake's declared inputs resolve by name:
@@ -31,14 +31,14 @@ let
       sourceInfo ? { },
     }:
     let
-      flakeExpr = import (path + "/flake.nix");
+      flakeExpr = builtins.import (path + "/flake.nix");
       declared = flakeExpr.inputs or { };
 
       segments = s: builtins.filter (x: builtins.isString x && x != "") (builtins.split "/" s);
 
       missingFor =
         name: spec:
-        throw ''
+        builtins.throw ''
           callConsumerFlake: input `${name}` of ${builtins.toString path} is declared
           as ${
             if (builtins.isAttrs spec) && (spec ? follows) then
