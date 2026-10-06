@@ -49,13 +49,13 @@ let
   validateEntry =
     e:
     if !builtins.isAttrs e then
-      throw "caisson-core: an entry must be an attribute set { key ? null, imports ? [ ], overlay }"
+      builtins.throw "caisson-core: an entry must be an attribute set { key ? null, imports ? [ ], overlay }"
     else if !(e ? overlay) || !builtins.isFunction e.overlay then
-      throw "caisson-core: entry.overlay must be a function (final: prev: { ... })"
+      builtins.throw "caisson-core: entry.overlay must be a function (final: prev: { ... })"
     else if !builtins.isList (e.imports or [ ]) then
-      throw "caisson-core: entry.imports must be a list of entries"
+      builtins.throw "caisson-core: entry.imports must be a list of entries"
     else if (e.key or null) != null && !builtins.isString (e.key or null) then
-      throw "caisson-core: entry.key must be a string or null"
+      builtins.throw "caisson-core: entry.key must be a string or null"
     else
       e;
 
@@ -79,7 +79,7 @@ let
               i = validateEntry rawImport;
             in
             if (i.key or null) == null then
-              throw "caisson-core: a keyless entry cannot be imported; imports address stable identities, so give the entry a key"
+              builtins.throw "caisson-core: a keyless entry cannot be imported; imports address stable identities, so give the entry a key"
             else
               goEntry s stack' i;
           afterImports = builtins.foldl' walkImport state (e.imports or [ ]);
@@ -188,7 +188,7 @@ let
         let
           key = "caisson-core/${name}";
           file = ../lib-overlays + "/${name}";
-          applied = import file {
+          applied = builtins.import file {
             closure-inputs = sources;
             inherit entries compose coreEntries;
           };
@@ -199,7 +199,7 @@ let
             inherit key;
             imports = applied.imports or [ ];
             overlay = applied.overlay;
-            origin = toString file;
+            origin = builtins.toString file;
           };
         }
       ) names

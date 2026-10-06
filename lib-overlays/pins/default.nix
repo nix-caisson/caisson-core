@@ -64,8 +64,8 @@
 { ... }:
 let
 
-  flakeLock = import ./flake-lock.nix;
-  npins = import ./npins.nix;
+  flakeLock = builtins.import ./flake-lock.nix;
+  npins = builtins.import ./npins.nix;
 
   present =
     names: attrs:
@@ -136,7 +136,7 @@ let
     inputs:
     let
       self =
-        inputs.self or (throw ''
+        inputs.self or (builtins.throw ''
           caisson-core: pins.flake takes the inputs a flake's `outputs` receives,
           `self` included; it reads the root from `self`. For a flake.nix and
           flake.lock pair Nix does not evaluate, use pins.flake-compat.
@@ -178,8 +178,8 @@ let
           raw = flakeLock.readLock dir;
         in
         if raw == null then
-          throw ''
-            caisson-core: pins.flake-compat reads `${toString dir}/flake.lock`, which does
+          builtins.throw ''
+            caisson-core: pins.flake-compat reads `${builtins.toString dir}/flake.lock`, which does
             not exist. Lock the flake (`nix flake lock` in that directory).
           ''
         else
@@ -207,8 +207,8 @@ let
           sourceInfo =
             if relative then
               if parent != [ ] then
-                throw ''
-                  caisson-core: pins.flake-compat: the lock node `${key}` of `${toString dir}` is a
+                builtins.throw ''
+                  caisson-core: pins.flake-compat: the lock node `${key}` of `${builtins.toString dir}` is a
                   relative path input inside the input `${builtins.concatStringsSep "/" parent}`,
                   which is not supported; only relative path inputs of the flake itself are.
                 ''
@@ -221,7 +221,7 @@ let
           inputs = builtins.mapAttrs (_name: spec: nodes.${flakeLock.resolveInput lock spec}.result) (
             node.inputs or { }
           );
-          outputs = (import (outPath + "/flake.nix")).outputs (inputs // { self = result; });
+          outputs = (builtins.import (outPath + "/flake.nix")).outputs (inputs // { self = result; });
           result =
             if node.flake or true then
               outputs
@@ -269,7 +269,7 @@ let
         if builtins.pathExists file then
           builtins.fromJSON (builtins.readFile file)
         else
-          throw "caisson-core: pins.npins reads `${toString file}`, which does not exist.";
+          builtins.throw "caisson-core: pins.npins reads `${builtins.toString file}`, which does not exist.";
       sourceOf =
         _name: descriptor:
         npins.fetch descriptor

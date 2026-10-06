@@ -24,6 +24,29 @@ jobs:
         run: |
           find lib lib-overlays -name '*.nix' -print0 \
             | xargs -0 -n1 nix-instantiate --parse > /dev/null
+      # Nix lets some builtins be written without the `builtins.`
+      # prefix: `import`, `throw`, `toString`, `map` and the others
+      # listed in `names` below. The library code writes the prefix on
+      # those too (`builtins.import`), so `builtins` is the one name it
+      # uses that it does not define. This step refuses a bare use.
+      # `true`, `false` and `null` stay bare. The parser's
+      # output has no comments and has interpolations expanded to
+      # code, so with string literals removed a bare name is a use.
+      - name: qualified-builtins lint
+        run: |
+          names='abort|baseNameOf|break|derivation|derivationStrict|dirOf|fetchGit|fetchMercurial|fetchTarball|fetchTree|fromTOML|import|isNull|map|placeholder|removeAttrs|scopedImport|throw|toString'
+          status=0
+          while IFS= read -r -d '' file; do
+            found=$(nix-instantiate --parse "$file" \
+              | sed -E 's/"([^"\\]|\\.)*"//g' \
+              | grep -oE "(^|[^.A-Za-z0-9_'-])($names)([^A-Za-z0-9_'-]|\$)" \
+              | sort | uniq -c | tr '\n' ' ' || true)
+            if [ -n "$found" ]; then
+              echo "$file: bare global builtins: $found"
+              status=1
+            fi
+          done < <(find lib lib-overlays -name '*.nix' -print0)
+          exit "$status"
       - run: nix flake check -L
       - run: nix eval -f tests summary
   # The slipping downstream run: caisson's pinned-world check, built

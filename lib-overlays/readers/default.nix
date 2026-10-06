@@ -51,8 +51,8 @@ let
       if type == "directory" || type == "symlink" then
         dir + "/${name}"
       else
-        throw ''
-          caisson-core: ${what} reads `${toString dir}`, where every entry is a
+        builtins.throw ''
+          caisson-core: ${what} reads `${builtins.toString dir}`, where every entry is a
           directory, but `${name}` is a file. Move it out of the directory being
           read, or register by hand.
         ''
@@ -67,8 +67,8 @@ let
       if builtins.pathExists (path + "/default.nix") then
         path
       else
-        throw ''
-          caisson-core: ${what} reads `${toString dir}`, where every entry is a
+        builtins.throw ''
+          caisson-core: ${what} reads `${builtins.toString dir}`, where every entry is a
           directory holding a default.nix, but `${name}` holds none.
         ''
     ) (subdirectoriesOf what dir);
@@ -82,8 +82,8 @@ let
         if classes ? ${class} then
           classes.${class}.mkModule
         else
-          throw ''
-            caisson-core: mkModules reads `${toString dir}/${class}`, but no integration
+          builtins.throw ''
+            caisson-core: mkModules reads `${builtins.toString dir}/${class}`, but no integration
             composed in this library declares the class `${class}` (the declared
             classes are ${builtins.concatStringsSep ", " (builtins.attrNames classes)}).
             Compose the integration that owns the class, declare the class from an

@@ -6,7 +6,7 @@
 {
   overlay = _final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
-      resolve = import ./resolve.nix;
+      resolve = builtins.import ./resolve.nix;
     };
   };
 }

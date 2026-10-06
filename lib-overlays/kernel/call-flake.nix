@@ -16,7 +16,7 @@
   sourceInfo ? { },
 }:
 let
-  flake = import (src + "/flake.nix");
+  flake = builtins.import (src + "/flake.nix");
   outputs = flake.outputs (inputs // { inherit self; });
   self =
     outputs

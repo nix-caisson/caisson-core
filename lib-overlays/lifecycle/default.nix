@@ -61,7 +61,7 @@ let
         if (builtins.isAttrs overlay) && (builtins.hasAttr "overlay" overlay) then
           overlay
         else
-          throw ''
+          builtins.throw ''
             Library overlays are `{ imports, overlay }` attrsets (build them
             with mkLibOverlay, or use another flake's exported overlays), but
             composition encountered a ${builtins.typeOf overlay}.
@@ -81,7 +81,7 @@ let
             byKey raw
           else
             let
-              synthetic = "${key}/imports/${toString i}";
+              synthetic = "${key}/imports/${builtins.toString i}";
             in
             raw
             // {
@@ -145,7 +145,7 @@ let
       let
         root =
           if src == null then
-            throw ''
+            builtins.throw ''
               caisson-core: the `nixpkgs-lib` entry has no source. Declare
               `defaultEcosystemSrc.nixpkgs-lib` (the nixpkgs.lib mirror, or nixpkgs'
               `lib` directory) or `defaultEcosystemSrc.nixpkgs` (a nixpkgs checkout)
@@ -156,7 +156,7 @@ let
             "${src}";
         libDir = if builtins.pathExists "${root}/lib/default.nix" then "${root}/lib" else root;
       in
-      prev // import libDir;
+      prev // builtins.import libDir;
   };
 
   # Build a composition-bound mkLibOverlay: everything passed to it
@@ -189,7 +189,7 @@ let
                 "In lib overlay imported from `${builtins.toString freeformOverlay}`.\n"
               else
                 "";
-            reified = if requiresImport then import freeformOverlay else freeformOverlay;
+            reified = if requiresImport then builtins.import freeformOverlay else freeformOverlay;
             applied =
               if builtins.isFunction reified then
                 reified (
@@ -200,7 +200,7 @@ let
                   // extraOverlayClosure
                 )
               else
-                throw ''
+                builtins.throw ''
                   ${provenance}mkLibOverlay expects a function taking the closure attrset
                   (`{ closure-inputs, closure-lib, mkLibOverlay, ... }:`) as its first arg
                   list, but got a ${builtins.typeOf reified}. Register already-built overlays
@@ -217,7 +217,7 @@ let
             # has none.
             // (if requiresImport then { origin = builtins.toString freeformOverlay; } else { })
           else
-            throw ''
+            builtins.throw ''
               ${provenance}After the closure arg list, a lib overlay is an
               `{ imports ? [ ], overlay }` attrset: put the `final: prev:` function
               under `overlay`, and any overlays it depends on under `imports`. Got
@@ -255,7 +255,7 @@ let
               "In package overlay imported from `${builtins.toString freeformOverlay}`.\n"
             else
               "";
-          reified = if requiresImport then import freeformOverlay else freeformOverlay;
+          reified = if requiresImport then builtins.import freeformOverlay else freeformOverlay;
           applied =
             if builtins.isFunction reified then
               reified {
@@ -264,7 +264,7 @@ let
                 inherit mkPkgOverlay;
               }
             else
-              throw ''
+              builtins.throw ''
                 ${provenance}mkPkgOverlay expects a function taking the closure attrset
                 (`{ closure-inputs, closure-lib, mkPkgOverlay, ... }:`) as its first arg
                 list, but got a ${builtins.typeOf reified}. Register already-built package
@@ -282,7 +282,7 @@ let
             origin = if requiresImport then builtins.toString freeformOverlay else null;
           }
         else
-          throw ''
+          builtins.throw ''
             ${provenance}After the closure arg list, a package overlay is an
             `{ imports ? [ ], overlay }` attrset: put the nixpkgs overlay
             (`final: prev:`) under `overlay`, and the package overlays it depends
@@ -306,7 +306,7 @@ let
           raw = builtins.elemAt (entry.imports or [ ]) i;
           carried = raw.key or null;
         in
-        rekeyPkgOverlay keyOf (if carried == null then "${key}#import-${toString i}" else keyOf carried) raw
+        rekeyPkgOverlay keyOf (if carried == null then "${key}#import-${builtins.toString i}" else keyOf carried) raw
       ) (builtins.length (entry.imports or [ ]));
     };
 
@@ -323,9 +323,9 @@ let
       check =
         e:
         if !builtins.isAttrs e || !builtins.isFunction (e.overlay or null) then
-          throw "caisson-core.pkgOverlaysFor: a package overlay is an `{ key, imports ? [ ], overlay }` attrset whose `overlay` is a function (final: prev: { ... }); select entries from a registry (`libManifest.pkgOverlays`)"
+          builtins.throw "caisson-core.pkgOverlaysFor: a package overlay is an `{ key, imports ? [ ], overlay }` attrset whose `overlay` is a function (final: prev: { ... }); select entries from a registry (`libManifest.pkgOverlays`)"
         else if !builtins.isString (e.key or null) then
-          throw "caisson-core.pkgOverlaysFor: a selected package overlay has no key; select entries from a registry (`libManifest.pkgOverlays`), where every entry carries its registry name"
+          builtins.throw "caisson-core.pkgOverlaysFor: a selected package overlay has no key; select entries from a registry (`libManifest.pkgOverlays`), where every entry carries its registry name"
         else
           e;
       go =
@@ -342,7 +342,7 @@ let
           state
         else if state.seen ? ${k} then
           if origin != null && priorOrigin != null && origin != priorOrigin then
-            throw ''
+            builtins.throw ''
               caisson-core: two different package overlays are registered under the
               key `${k}`, from `${priorOrigin}` and from `${origin}`. One key names one
               entry: give one of them another name, or select one of them.
@@ -361,7 +361,7 @@ let
           };
     in
     if !builtins.isList selection then
-      throw "caisson-core.pkgOverlaysFor expects a list of package overlay entries (e.g. `[ registry.default ]`), but got a ${builtins.typeOf selection}."
+      builtins.throw "caisson-core.pkgOverlaysFor expects a list of package overlay entries (e.g. `[ registry.default ]`), but got a ${builtins.typeOf selection}."
     else
       (builtins.foldl' (s: e: go s [ ] e) {
         seen = { };
@@ -373,7 +373,7 @@ let
     (
       let
         requiresImport = (builtins.isPath module) || (builtins.isString module);
-        reifiedModule = (if requiresImport then import module else module);
+        reifiedModule = (if requiresImport then builtins.import module else module);
         applied = (
           if
             (
@@ -503,7 +503,7 @@ let
       };
     in
     if !(builtins.isFunction child && builtins.functionArgs child == expected) then
-      throw ''
+      builtins.throw ''
         ${what} is declared with ${
           if builtins.isFunction child then
             "a function that does not take exactly `{ name, parent }`"
@@ -521,7 +521,7 @@ let
       if isManifest result || isEvaluations result then
         result
       else
-        throw "The configuration ${what} did not return a manifest, or manifests by system.";
+        builtins.throw "The configuration ${what} did not return a manifest, or manifests by system.";
 
   isManifest = value: builtins.isAttrs value && (value._type or null) == "caisson-manifest";
 
@@ -636,7 +636,7 @@ let
             else if outside == [ ] then
               stated
             else
-              throw ''
+              builtins.throw ''
                 caisson-core: the ${parent.type or "unknown"} configuration ${
                   if parent ? name then "`${parent.name}`" else "at the top"
                 } states the systems ${builtins.concatStringsSep ", " stated} for the
@@ -750,7 +750,7 @@ let
         if owned == [ ] then
           record
         else
-          throw ''
+          builtins.throw ''
             caisson-core.mkConfiguration: the `${type}` integration's `record` names
             `${builtins.head owned}`, a field mkConfiguration writes.
           '';
@@ -1013,7 +1013,7 @@ let
       libManifest = final.caisson-core.libManifest;
     in
     if libManifest == null then
-      throw ''
+      builtins.throw ''
         caisson-core.finalizeTop finalizes a configuration under a
         composition's manifest, but this library carries none at
         `caisson-core.libManifest`. Compose the library with
@@ -1126,7 +1126,7 @@ let
               if builtins.isFunction m then
                 m closureArgs
               else
-                throw ''
+                builtins.throw ''
                   mkModule (class `${moduleClass}`) expects a module function taking the
                   closure attrset (`{ closure-inputs, closure-lib, mkModule, ... }:`) as
                   its first arg list, but got a ${builtins.typeOf m}.
@@ -1140,7 +1140,7 @@ let
             {
               _file = freeformModule;
               key = builtins.toString freeformModule;
-              imports = [ (applyClosure (import freeformModule)) ];
+              imports = [ (applyClosure (builtins.import freeformModule)) ];
             }
           else
             moduleMap applyClosure freeformModule
@@ -1216,7 +1216,7 @@ let
           if builtins.isAttrs resolvedArgs.sources then
             resolvedArgs.sources
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `sources` to be an attribute set of pinned source trees keyed
               by name, as a pin reader returns it, but got a ${builtins.typeOf resolvedArgs.sources}.
             '';
@@ -1226,7 +1226,7 @@ let
           if rawRoot == null || (builtins.isAttrs rawRoot && rawRoot ? outPath) then
             rawRoot
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `root` to be the identity of the tree being built, an
               attribute set with at least `outPath` (as pins.flake or pins.gitRoot
               returns it), or null for a composition that is not a top, but got a
@@ -1246,7 +1246,7 @@ let
             relativeTo =
               prefix: dir:
               let
-                d = toString dir;
+                d = builtins.toString dir;
                 n = builtins.stringLength prefix;
               in
               if d == prefix then
@@ -1263,7 +1263,7 @@ let
                   if pin == null || !(pin ? dir) || root == null then
                     null
                   else
-                    relativeTo (toString root.outPath) pin.dir;
+                    relativeTo (builtins.toString root.outPath) pin.dir;
               in
               if rel == null then
                 source
@@ -1310,7 +1310,7 @@ let
           then
             rawSystems
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `systems` to be a list of system strings (e.g.
               `[ "x86_64-linux" ]`), but got a ${builtins.typeOf rawSystems}.
             '';
@@ -1327,7 +1327,7 @@ let
           if rawName == null || builtins.isString rawName then
             rawName
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `name` to be the string naming the project, which is
               also the namespace it contributes to the composed library (e.g.
               `"my-project"`, read as `lib.my-project`), but got a ${builtins.typeOf rawName}.
@@ -1347,7 +1347,7 @@ let
           if builtins.isAttrs rawProjects then
             rawProjects
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `projects` to be an attribute set of consumed
               project contributions keyed by project name (e.g.
               `{ my-dep = inputs.my-dep; }`), but got a ${builtins.typeOf rawProjects}.
@@ -1446,7 +1446,7 @@ let
           if builtins.isAttrs rawEcosystems then
             rawEcosystems
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `defaultEcosystemSrc` to be an attribute set of ecosystem
               sources keyed by their exact names (e.g. `{ nixpkgs = ...; }`),
               but got a ${builtins.typeOf rawEcosystems}.
@@ -1461,7 +1461,7 @@ let
             # The plain function rather than the function in the
             # composed library: the source decides what the fixpoint
             # holds, so it cannot be read out of the fixpoint.
-            resolve = import ../resolve/resolve.nix;
+            resolve = builtins.import ../resolve/resolve.nix;
             fromPart = resolve {
               name = "nixpkgs-lib";
               defaults = defaultEcosystemSrc;
@@ -1491,7 +1491,7 @@ let
           if builtins.isFunction rawModules then
             rawModules bootstrapLib
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `modules` to be a function taking the bootstrap
               library (`lib: { ... }`), usually
               `lib: lib.caisson-core.mkModules ./modules`, but got a
@@ -1507,7 +1507,7 @@ let
           if builtins.isFunction rawConfigs then
             rawConfigs bootstrapLib
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `configs` to be a function taking the bootstrap
               library (`lib: { ... }`), usually
               `lib: lib.caisson-core.mkModules ./configs`, but got a
@@ -1520,7 +1520,7 @@ let
           if builtins.isFunction rawLibOverlays then
             rawLibOverlays coreLib
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `libOverlays` to be a function taking the core
               library (`lib: { <name> = lib.caisson-core.mkLibOverlay ./x; }`),
               usually `lib: lib.caisson-core.mkLibOverlays ./lib-overlays`, but got a
@@ -1535,7 +1535,7 @@ let
           if builtins.isFunction rawPkgOverlays then
             rawPkgOverlays bootstrapLib
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `pkgOverlays` to be a function taking the bootstrap
               library (`lib: { <name> = lib.caisson-core.mkPkgOverlay ./x; }`),
               usually `lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays`, but got a
@@ -1641,7 +1641,7 @@ let
           if builtins.isFunction rawLibOverlayImports then
             rawLibOverlayImports coreLib
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `libOverlayImports` to be a function taking the core
               lib and returning the entries to compose
               (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
@@ -1653,7 +1653,7 @@ let
           if builtins.isFunction rawExtraLibOverlayImports then
             rawExtraLibOverlayImports coreLib
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `extraLibOverlayImports` to be a function taking the
               core lib and returning the entries to compose beside the selection
               (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
@@ -1665,7 +1665,7 @@ let
             if builtins.isList libOverlayImports then
               libOverlayImports
             else
-              throw ''
+              builtins.throw ''
                 mkLib expects `libOverlayImports` to return a list of registered
                 entries, but it returned a ${builtins.typeOf libOverlayImports}.
               ''
@@ -1674,7 +1674,7 @@ let
             if builtins.isList extraLibOverlayImports then
               extraLibOverlayImports
             else
-              throw ''
+              builtins.throw ''
                 mkLib expects `extraLibOverlayImports` to return a list of registered
                 entries, but it returned a ${builtins.typeOf extraLibOverlayImports}.
               ''
@@ -1823,7 +1823,7 @@ let
               if builtins.isFunction rawPkgSets then
                 rawPkgSets registeredLib
               else
-                throw ''
+                builtins.throw ''
                   mkLib expects `pkgSets` to be a function taking the library
                   with the registrations (`lib: { <name> = <package config>; }`),
                   but got a ${builtins.typeOf rawPkgSets}.
@@ -1844,10 +1844,10 @@ let
               if isManifest finalized then
                 finalized
               else
-                throw "The package config `pkgSets.${name}` did not return a manifest."
+                builtins.throw "The package config `pkgSets.${name}` did not return a manifest."
             ) declared
           else
-            throw ''
+            builtins.throw ''
               mkLib expects `pkgSets` to return an attribute set of package
               configs keyed by config name, but it returned a
               ${builtins.typeOf declared}.
@@ -1934,7 +1934,7 @@ let
         checkedManifests =
           given:
           if !builtins.isAttrs given then
-            throw ''
+            builtins.throw ''
               caisson-core.withManifests expects an attribute set of phase
               manifests (`{ pkgsManifest = <manifest>; }`), but got a ${builtins.typeOf given}.
             ''
@@ -1949,7 +1949,7 @@ let
               );
             in
             if unknown != [ ] then
-              throw ''
+              builtins.throw ''
                 caisson-core.withManifests fills in ${builtins.concatStringsSep " and " phaseManifests},
                 but was given `${builtins.head unknown}`.
               ''
@@ -1959,7 +1959,7 @@ let
                 if value == null || (builtins.isAttrs value && (value._type or null) == "caisson-manifest") then
                   value
                 else
-                  throw ''
+                  builtins.throw ''
                     caisson-core.withManifests expects `${attr}` to be a manifest
                     (an attribute set with `_type = "caisson-manifest"`) or null.
                   ''
@@ -2058,7 +2058,7 @@ let
             opaque = !(registeredLibOverlays ? ${key});
           }) selectionMeta.order
           ++ builtins.genList (i: {
-            key = "keyless/${toString i}";
+            key = "keyless/${builtins.toString i}";
             opaque = true;
           }) selectionMeta.tailLength;
 
@@ -2195,7 +2195,7 @@ let
             let
               layer = builtins.elemAt bootstrapComposition.layers i;
               key =
-                if (layer.entry.key or null) != null then layer.entry.key else "keyless/${toString (i - keyedLength)}";
+                if (layer.entry.key or null) != null then layer.entry.key else "keyless/${builtins.toString (i - keyedLength)}";
             in
             {
               inherit layer key;

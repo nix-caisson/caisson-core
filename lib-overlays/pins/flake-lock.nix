@@ -23,8 +23,8 @@ let
     if lock.version >= 5 && lock.version <= 7 then
       lock
     else
-      throw ''
-        caisson-core: ${what} reads a flake.lock of version ${toString lock.version},
+      builtins.throw ''
+        caisson-core: ${what} reads a flake.lock of version ${builtins.toString lock.version},
         and only versions 5 to 7 are supported. Relock it with a current Nix
         (`nix flake lock`).
       '';
@@ -91,7 +91,7 @@ let
   query =
     attrs:
     let
-      value = v: if v == true then "1" else if v == false then "0" else toString v;
+      value = v: if v == true then "1" else if v == false then "0" else builtins.toString v;
       pairs = builtins.map (n: "${n}=${value attrs.${n}}") (builtins.attrNames attrs);
     in
     if pairs == [ ] then "" else "?" + builtins.concatStringsSep "&" pairs;
@@ -138,7 +138,7 @@ let
     else if type == "tarball" || type == "file" then
       ref.url
     else
-      throw "caisson-core: cannot render a flake reference of type `${toString type}`";
+      builtins.throw "caisson-core: cannot render a flake reference of type `${builtins.toString type}`";
 
 in
 {
