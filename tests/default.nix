@@ -541,6 +541,43 @@ let
       in
       composed.stubIncrement 1 == 2;
 
+    # The manifest says where the `nixpkgs-lib` layer comes from by
+    # pointing at the file of caisson-core that materializes it: the
+    # registration and, where the entry is composed, the layer both
+    # carry that file as their origin. `mkNixpkgsLibEntry`, the same
+    # entry over a source the caller names, carries it too.
+    lifecycleNixpkgsLibEntryRecordsThePolyfillFileAsItsOrigin =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+          libOverlays = lib: {
+            probe = lib.caisson-core.mkLibOverlay (
+              { entries, ... }:
+              {
+                imports = [ entries.nixpkgs-lib ];
+                overlay = _final: _prev: { };
+              }
+            );
+          };
+        };
+        history = composed.caisson-core.libManifest.history;
+        eventOf =
+          operation: key:
+          builtins.head (builtins.filter (e: e.operation == operation && e.key == key) history);
+        polyfill = builtins.toString ../lib-overlays/nixpkgs-lib;
+        origin = {
+          project = "caisson-core";
+          file = polyfill;
+        };
+      in
+      builtins.pathExists (polyfill + "/default.nix")
+      && (eventOf "registry" "libOverlays.nixpkgs-lib").origin == origin
+      && (eventOf "layer" "nixpkgs-lib").origin == origin
+      && (core.mkNixpkgsLibEntry ./fixtures/nixpkgs-lib-stub).origin == polyfill
+      && composed.stubIncrement 1 == 2;
+
     lifecycleNixpkgsLibEntryFailsOnlyWhereImported =
       throws
         (core.mkLib {
