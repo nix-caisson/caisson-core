@@ -142,345 +142,506 @@ unexpected argument is Nix's error at the call site, naming
 `mkLib` and pointing at the pattern, whose comments say what each
 argument is.
 
-The library is built in stages, each a new fixpoint over the
-empty seed with a manifest in `caisson-core.libManifest`, and
-each there because some argument is a function of it. The core lib
-holds caisson-core's entries and nothing else, with the lib
-overlay registry grafted onto its manifest; it is the lib
-`libOverlays` and `libOverlayImports` receive, so a registration
-makes its entries with `lib.caisson-core.mkLibOverlay` and a selection
-refers to entries as
-`lib.caisson-core.nixpkgs-lib.overlays.<name>`. `libOverlayImports`
-replaces the default selection, every registered overlay that is not a
-published entry, and `extraLibOverlayImports`, of the same form, adds
-to the selection, whichever it is. The bootstrap lib
-adds the selection, the `nixpkgs-lib` entry and every integration
-among it; it is the lib `modules`, `configs` and `pkgOverlays`
-receive, and its
-manifest lacks `modules`, `moduleProjects`, `configs`, `pkgOverlays`
-and `pkgSets`. The registered lib is the same entries with those
-registrations grafted on; it is the lib `pkgSets` receives, since a
-package config selects from the registered modules and package
-overlays, and its manifest lacks `pkgSets`. The full lib adds
-`pkgSets`, and it is the lib `mkLib` returns. The core, bootstrap and
-registered manifests have `childless = true`. A registration made
-at an earlier stage still closes over the full lib: the
-constructors those libs hold (`mkModule` and every class-bound
-`mkModule` made from it, `mkLibOverlay`, `mkPkgOverlay`) give
-`closure-lib` the full lib, whose `caisson-core.modules` is the
-registry the entry joins. A same-key registration replaces one of
-caisson-core's entries from the bootstrap stage on; the core lib keeps
-the original.
+The rest of this section is reference, one topic per heading:
 
-A tree laid out as `modules/<class>/<name>/default.nix`,
-`configs/<class>/<name>/default.nix`,
-`lib-overlays/<name>/default.nix` and
-`pkg-overlays/<name>/default.nix` derives the registrations
-from its directories, with the readers of the lib each registry
-function is handed:
-`modules = lib: lib.caisson-core.mkModules ./modules;`,
-`configs = lib: lib.caisson-core.mkModules ./configs;`,
-`libOverlays = lib: lib.caisson-core.mkLibOverlays ./lib-overlays;` and
-`pkgOverlays = lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays;`.
-A reader belongs to the lib it is read from, so a composition that
-registers another `caisson-core/readers` entry reads its directories
-with that entry. The first level of a
-modules directory is the class, whatever its name, and each entry
-registers through the class index of the composed library,
-`caisson-core.classes.<class>`: the `mkModule` of the integration that
-declares the class. An integration declares the class it owns from
-its overlay (`contributeClasses prev { nixos = { integration =
-"nixos"; mkModule = final.caisson-core.mkModule "nixos"; }; }`), a
-declaration composed later replaces it, which is how an integration
-wrapping another takes over the class, and caisson-core declares the
-class-free `generic` class itself. A directory for a class no
-composed integration declares is an error. `mkLibOverlays` applies
-`mkLibOverlay` to each entry, and `mkPkgOverlays` `mkPkgOverlay`. An entry is a directory holding a
-`default.nix`, a symlink to such a directory included; anything else in a
-directory being read is an error, so a stray file cannot silently
-vanish from a registry. A tree with another layout writes the
-registrations by hand.
+- how the library is built: [Stages](#stages),
+  [Selecting lib overlays](#selecting-lib-overlays),
+  [Registering from directories](#registering-from-directories),
+  [Module classes](#module-classes),
+  [The nixpkgs library](#the-nixpkgs-library);
+- what it holds: [What the composed library carries](#what-the-composed-library-carries),
+  [What a registered file receives](#what-a-registered-file-receives),
+  [caisson-core composes itself](#caisson-core-composes-itself),
+  [Projects](#projects), [Package overlays](#package-overlays);
+- what it records: [The manifest](#the-manifest), [History](#history),
+  [Phase manifests](#phase-manifests);
+- the tree of configurations: [Configurations](#configurations),
+  [Evaluating a configuration with and without its children](#evaluating-a-configuration-with-and-without-its-children),
+  [Configurations evaluated per system](#configurations-evaluated-per-system),
+  [What an evaluation gives the configurations inside it](#what-an-evaluation-gives-the-configurations-inside-it),
+  [Telling names apart](#telling-names-apart-elide),
+  [Finding a manifest](#finding-a-manifest-manifestof).
 
-Nothing is composed over. nixpkgs' library arrives as the published
-`nixpkgs-lib` entry, which imports the `lib` directory of the source
-supplying that part (`defaultEcosystemSrc.nixpkgs-lib`, else
-`.nixpkgs`, else a pinned source named exactly so) as that source fixes it;
-a polyfill composed later overrides a name for readers of the
-composed library, not for upstream's internal references, since
-nixpkgs' `lib/default.nix` exposes no way to re-tie its fixpoint. An
-overlay that needs upstream's functions imports the
-entry from its closure (`{ entries, ... }: { imports = [ entries.nixpkgs-lib ]; ... }`);
-a composition that declares no source fails only where that entry is
-composed, with a message naming the declaration. The core entry
-(`caisson-core`) and the `nixpkgs-lib` entry sit in the registry under
-those names like any registration, so a same-name registration
-replaces either.
+### Stages
 
-The composed library carries, under `caisson-core`: `mkLib`,
-`mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized),
-`mkModules`, `mkLibOverlays`, `mkPkgOverlays`, `pkgOverlaysFor`,
-`mkNixpkgsLibEntry`, the class-keyed `modules`
-registry, the class index `classes`, the phase manifests
-(`libManifest`, `pkgsManifest`, `evalManifest`), `manifestOf`,
-`definers`, `finalizeChild`, `mkConfiguration`, `finalizeTop`, `elide`,
-the lib
-overlay registry view
-`nixpkgs-lib.overlays` (the manifest's `libOverlays`, which a
-`libOverlayImports` selection refers into),
-plus `compose`,
-`resolve`, `importApply`, `callConsumerFlake`, and the pin readers
-`pins`. A registered overlay file takes the closure
-attrset
-`{ closure-inputs, closure-lib, mkLibOverlay, mkModule, contributeModules, contributeClasses, entries, ... }`
-as its first arg list and a registered module
-`{ closure-inputs, closure-lib, mkModule, ... }`; `closure-inputs` is
-the composition's pinned sources, and `closure-lib` is the
-composed library of the composition that registered the file, bound
-lazily, so an overlay's functions and a module reach that
-composition's registry under `caisson-core.modules.<class>` wherever
-they are later composed or evaluated. Overlays contribute modules
-through their closure (`mkModule`, `contributeModules`); the
-composing flake's local registrations apply last and win over
-same-named contributions.
+The library is built in stages. Each is a new fixpoint over the
+empty seed with a manifest in `caisson-core.libManifest`, and each
+exists because some argument of `mkLib` is a function of it.
 
-caisson-core composes itself. `lib/default.nix` holds the
-primitive, `compose`, and composes the overlays under
-`lib-overlays/<name>/default.nix` (`compose`, `resolve`, `kernel`,
-`lifecycle`, `readers`, `pins`) over the empty seed into the `caisson-core`
-namespace; `mkLib` composes the same entries into every consumer's
-library, keyed `caisson-core/<name>`, so `import caisson-core` and
-`caisson-core` inside a composed library are one definition and each
-part is a registered entry a same-key entry replaces. `coreEntries
-{ sources, entries }` returns those entries for a composition assembled
-with `compose` directly.
+| Stage | What it holds | Arguments that receive it | Its manifest lacks |
+| --- | --- | --- | --- |
+| core | caisson-core's entries, with the lib overlay registry on its manifest | `libOverlays`, `libOverlayImports`, `extraLibOverlayImports` | everything below |
+| bootstrap | the core lib plus the selection, the `nixpkgs-lib` entry and every integration among them | `modules`, `configs`, `pkgOverlays` | `modules`, `moduleProjects`, `configs`, `pkgOverlays`, `pkgSets` |
+| registered | the same entries, with those registrations on the manifest | `pkgSets` | `pkgSets` |
+| full | the registered lib plus `pkgSets` | none: `mkLib` returns it | nothing |
 
-A `projects` value is an attrset with `libOverlays`, class-keyed
-`modules` and `pkgOverlays` dictionaries, the outputs a flake built on
-this machinery publishes. Its entries join the registered dictionaries
-under `<project>/<name>`, so the existing selections keep per-item
-choice and a local registration wins a name collision. Each registry
-records where an entry came from, so an export selector can keep the
-entries the composition registered itself: a lib overlay entry carries
-`project` (null for a local registration, the project's name for a
-contributed entry, `caisson-core` for the entries caisson-core publishes
-into every composition), and the manifest's `moduleProjects.<class>.<name>`
-holds the same for modules, beside the module dictionary, since a
-module value cannot carry a field without becoming a different module.
+- `pkgSets` receives the registered lib because a package config
+  selects from the registered modules and package overlays.
+- The core, bootstrap and registered manifests have
+  `childless = true`.
+- A registration made at an earlier stage still closes over the full
+  lib. The constructors those libs hold (`mkModule` and every
+  class-bound `mkModule` made from it, `mkLibOverlay`, `mkPkgOverlay`)
+  give `closure-lib` the full lib, whose `caisson-core.modules` is the
+  registry the entry joins.
+- A same-key registration replaces one of caisson-core's entries from
+  the bootstrap stage on. The core lib keeps the original.
 
-The package overlay registry holds package overlays in the lib
-overlay entry's shape: a file handed to `mkPkgOverlay` takes the
-closure `{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and
-returns `{ imports ? [ ], overlay }`, where `overlay` is a nixpkgs
-overlay. Every registered entry carries its registry name as `key`,
-the file it was read from as `origin` (null for an entry built from a
-function), and `project`, null for a local registration and the
-project's name for a contributed entry, so a selection of the local
-entries alone is a filter on that field. An entry imports a sibling
-from the registry of the composition that registered it,
-`closure-lib.caisson-core.libManifest.pkgOverlays.<name>`. A
-project's entries are rekeyed as they join: a key without a `/` is
-one of the project's names and becomes `<project>/<key>`, imports
-included, so an import still meets its sibling; a key with a `/`
-names an entry the project took from another project and is kept, so
-two projects importing the same entry import one entry. Nothing in
-caisson-core applies the registry. `pkgOverlaysFor selection` turns a
-list of entries into the list of nixpkgs overlays a package set
-applies: each entry after the entries it imports, each key once where
-it first occurs, and two entries with different origins under one key
-refused. By convention the entries named `default` (`default`,
-`<project>/default`) are the default selection, as for modules; the
+### Selecting lib overlays
+
+A `libOverlays` registration makes its entries with
+`lib.caisson-core.mkLibOverlay`, and a selection refers to entries as
+`lib.caisson-core.nixpkgs-lib.overlays.<name>`.
+
+- The default selection is every registered overlay that is not a
+  published entry.
+- `libOverlayImports` replaces the default selection.
+- `extraLibOverlayImports`, of the same form, adds to the selection,
+  whichever it is.
+
+### Registering from directories
+
+A tree with this layout derives its registrations from its
+directories, using the readers of the lib each registry function is
+handed:
+
+| Directory | Registration |
+| --- | --- |
+| `modules/<class>/<name>/default.nix` | `modules = lib: lib.caisson-core.mkModules ./modules;` |
+| `configs/<class>/<name>/default.nix` | `configs = lib: lib.caisson-core.mkModules ./configs;` |
+| `lib-overlays/<name>/default.nix` | `libOverlays = lib: lib.caisson-core.mkLibOverlays ./lib-overlays;` |
+| `pkg-overlays/<name>/default.nix` | `pkgOverlays = lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays;` |
+
+- A reader belongs to the lib it is read from, so a composition that
+  registers another `caisson-core/readers` entry reads its directories
+  with that entry.
+- An entry is a directory holding a `default.nix`, or a symlink to
+  such a directory. Anything else in a directory being read is an
+  error, so a stray file cannot silently vanish from a registry.
+- `mkLibOverlays` applies `mkLibOverlay` to each entry, and
+  `mkPkgOverlays` applies `mkPkgOverlay`.
+- A tree with another layout writes the registrations by hand.
+
+### Module classes
+
+The first level of a modules directory is the class, whatever its
+name. Each entry registers through the class index of the composed
+library, `caisson-core.classes.<class>`, which holds the `mkModule` of
+the integration that declares the class.
+
+- An integration declares the class it owns from its overlay:
+  `contributeClasses prev { nixos = { integration = "nixos"; mkModule = final.caisson-core.mkModule "nixos"; }; }`.
+- A declaration composed later replaces an earlier one, which is how
+  an integration wrapping another takes over the class.
+- caisson-core declares the class-free `generic` class.
+- A directory for a class no composed integration declares is an
+  error.
+
+### The nixpkgs library
+
+Nothing is composed over. The nixpkgs library arrives as the
+published `nixpkgs-lib` entry, which imports the `lib` directory of
+the source supplying that part, as that source fixes it. The source
+is `defaultEcosystemSrc.nixpkgs-lib`, else `.nixpkgs`, else a pinned
+source named exactly so.
+
+- An overlay that needs upstream's functions imports the entry from
+  its closure: `{ entries, ... }: { imports = [ entries.nixpkgs-lib ]; ... }`.
+- A composition that declares no source fails only where that entry
+  is composed, with a message naming the declaration.
+- A polyfill composed later overrides a name for readers of the
+  composed library, and not for upstream's internal references, since
+  the `lib/default.nix` of nixpkgs exposes no way to re-tie its
+  fixpoint.
+- The core entry (`caisson-core`) and the `nixpkgs-lib` entry sit in
+  the registry under those names like any registration, so a
+  same-name registration replaces either.
+
+### What the composed library carries
+
+Under `caisson-core`:
+
+| Group | Names |
+| --- | --- |
+| Composition | `mkLib`, `compose`, `resolve`, `importApply`, `callConsumerFlake` |
+| Entry constructors | `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized), `mkNixpkgsLibEntry` |
+| Directory readers | `mkModules`, `mkLibOverlays`, `mkPkgOverlays` |
+| Registries | the class-keyed `modules`, the class index `classes`, `nixpkgs-lib.overlays` (the `libOverlays` of the manifest, which a `libOverlayImports` selection refers into), `pkgOverlaysFor` |
+| Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
+| Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
+| Pins | `pins` |
+
+### What a registered file receives
+
+A registered file takes a closure attribute set as its first argument
+list:
+
+- an overlay file takes
+  `{ closure-inputs, closure-lib, mkLibOverlay, mkModule, contributeModules, contributeClasses, entries, ... }`;
+- a module file takes `{ closure-inputs, closure-lib, mkModule, ... }`.
+
+`closure-inputs` is the pinned sources of the composition.
+`closure-lib` is the composed library of the composition that
+registered the file, bound lazily. So the functions of an overlay,
+and a module, reach the registry of that composition under
+`caisson-core.modules.<class>` wherever they are later composed or
+evaluated.
+
+Overlays contribute modules through their closure (`mkModule`,
+`contributeModules`). The local registrations of the composing flake
+apply last and win over same-named contributions.
+
+### caisson-core composes itself
+
+`lib/default.nix` holds the primitive, `compose`, and composes the
+overlays under `lib-overlays/<name>/default.nix` (`compose`,
+`resolve`, `kernel`, `lifecycle`, `readers`, `pins`) over the empty
+seed into the `caisson-core` namespace.
+
+`mkLib` composes the same entries into the library of every consumer,
+keyed `caisson-core/<name>`. So `import caisson-core` and
+`caisson-core` inside a composed library are one definition, and each
+part is a registered entry that a same-key entry replaces.
+
+`coreEntries { sources, entries }` returns those entries for a
+composition assembled with `compose` directly.
+
+### Projects
+
+A `projects` value is an attribute set with `libOverlays`,
+class-keyed `modules` and `pkgOverlays` dictionaries: the outputs a
+flake built on this machinery publishes. Its entries join the
+registered dictionaries under `<project>/<name>`, so the existing
+selections keep per-item choice and a local registration wins a name
+collision.
+
+Each registry records where an entry came from, so an export selector
+can keep the entries the composition registered:
+
+- A lib overlay entry carries `project`: null for a local
+  registration, the name of the project for a contributed entry, and
+  `caisson-core` for the entries caisson-core publishes into every
+  composition.
+- For modules the manifest holds the same under
+  `moduleProjects.<class>.<name>`, beside the module dictionary,
+  since a module value cannot carry a field without becoming a
+  different module.
+
+### Package overlays
+
+The package overlay registry holds package overlays in the shape of a
+lib overlay entry. A file handed to `mkPkgOverlay` takes the closure
+`{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and returns
+`{ imports ? [ ], overlay }`, where `overlay` is a nixpkgs overlay.
+
+Every registered entry carries:
+
+| Field | Value |
+| --- | --- |
+| `key` | its registry name |
+| `origin` | the file it was read from, null for an entry built from a function |
+| `project` | null for a local registration, the name of the project for a contributed entry |
+
+A selection of the local entries alone is a filter on `project`.
+
+An entry imports a sibling from the registry of the composition that
+registered it, `closure-lib.caisson-core.libManifest.pkgOverlays.<name>`.
+
+The entries of a project are rekeyed as they join:
+
+- A key without a `/` is a name of that project and becomes
+  `<project>/<key>`, imports included, so an import still meets its
+  sibling.
+- A key with a `/` names an entry the project took from another
+  project and is kept, so two projects importing the same entry import
+  one entry.
+
+Nothing in caisson-core applies the registry. `pkgOverlaysFor
+selection` turns a list of entries into the list of nixpkgs overlays
+a package set applies: each entry after the entries it imports, each
+key once where it first occurs. Two entries with different origins
+under one key are refused.
+
+By convention the entries named `default` (`default`,
+`<project>/default`) are the default selection, as for modules. The
 layer that builds package sets applies that default.
 
-The manifest is the composition's self-description, recorded at
-`caisson-core.libManifest`: `sources` (a directory reader's pin files
-stated relative to the root when the directory lies in the root's
-tree, `pin.dir` kept otherwise), `root` (null for a composition that
-is not a top), `defaultEcosystemSrc`, `systems`, `name`, the raw
-`projects` capture, the registered
-`libOverlays`, `modules` and `pkgOverlays` dictionaries (project
-entries prefixed, locals winning), `moduleProjects`, the `configs` registration, which also comes back
-as `caisson-core.configs`, and `pkgSets`, the package configs the
-`pkgSets` function declared, each finalized. A configuration learns
-its name and its parent from where it is declared, so an integration's
-`mkConfiguration` returns a function `{ name, parent }: <manifest>`:
-`finalizeChild { name; parent; } child` calls it with both, after
-checking with `builtins.functionArgs` that its pattern names exactly
-`name` and `parent`, and requires a manifest back. `mkLib` finalizes
-each `pkgSets` entry with the name it is declared under and the
+### The manifest
+
+The manifest is the self-description of the composition, recorded at
+`caisson-core.libManifest`.
+
+| Field | What it holds |
+| --- | --- |
+| `type` | `"lib"` |
+| `name` | the name of the project as declared on `mkLib`; absent when none is declared |
+| `sources` | the pinned sources. The pin files a directory reader read are stated relative to the root when the directory lies in the tree of the root, and `pin.dir` is kept otherwise |
+| `root` | the tree being built; null for a composition that is not a top |
+| `defaultEcosystemSrc`, `systems` | as declared on `mkLib` |
+| `projects` | the `projects` argument as given |
+| `libOverlays`, `modules`, `pkgOverlays` | the registered dictionaries, with project entries prefixed and local entries winning |
+| `moduleProjects` | where each module came from |
+| `configs` | the `configs` registration, also available as `caisson-core.configs` |
+| `pkgSets` | the package configs the `pkgSets` function declared, each finalized |
+| `entries` | the selection in composition order |
+| `history` | the events recorded on the way to the lib |
+
+The lib `mkLib` returns is the full lib of a root declaration, so
+`childless` is false, `parent` is null, and `ancestors`, `inputs`,
+`nearest` and `children` are empty.
+
+**`name`** is the name the composition holds for itself, and the
+namespace its overlays contribute to the composed library. It is not
+passed anywhere: readers pull it back out of the composed library. A
+layer above gives that name to a configuration no parent declares,
+since a name is otherwise the attribute a parent declares a child
+under.
+
+**`entries`** lists each entry as `{ key, opaque }`, with the entries
+caisson-core forces first. An entry is opaque when its key names no
+registry entry, which is an overlay imported by value and not
+registered. A keyless entry gets a synthesized `keyless/<n>` key.
+
+**`pkgSets`** entries are configurations (see Configurations below).
+`mkLib` finalizes each with the name it is declared under and the
 registered manifest as its parent, so anything else declared there is
-refused where it is declared. The registered manifest lacks `pkgSets`, so the
-full manifest lists the configs without containing itself, and
-caisson-core interprets nothing in them beyond the manifest shape. `name` is the project's name as declared
-on `mkLib`, the name the composition holds for itself and the
-namespace its overlays contribute to the composed library, and it is
-absent when none is declared; a layer above gives a configuration no parent declares that
-name, since a name is otherwise the attribute a parent declares a
-child under. It is not passed anywhere; readers pull it back out of
-the composed library. `type` is `"lib"`. `entries` lists the
-selection in composition order, caisson-core's forced entries first,
-each as `{ key, opaque }`; an entry is opaque when its key names no
-registry entry (an overlay imported by value rather than
-registered), and a keyless entry gets a synthesized `keyless/<n>`
-key. The lib `mkLib` returns is the full lib of a root declaration,
-so `childless` is false, `parent` is null, and `ancestors`, `inputs`,
-`nearest` and `children` are empty. `history` lists the events
-recorded on the way to the lib, in stage order, and the history of
-each stage begins with the history of the stage before it. The core
-stage records one `layer` event per caisson-core entry, then the lib
-overlay registrations. The bootstrap stage adds one `layer` event per
-entry it composes that the core stage did not, in composition order:
-the selection, and a registration replacing a caisson-core entry,
-which so comes after the entry it replaces. The registered stage adds
-the `modules`, `configs` and `pkgOverlays` registrations, and the full
-stage the `pkgSets` registrations.
-Each event has `manifest` (the name path, empty for the root lib),
-`type`, `operation` (`registry` or `layer`), `key`, `index` (its
-position within its operation) and `origin` (`project`, and `file`
-where the entry was built from a file; a lib overlay built from a file
-records it as `origin`). A layer event also carries, lazily, the
-sides of its overlay call `final: prev: result`, as the stage that
-recorded it composed them: `result`, the attrset its overlay
-returned, and `prev`, the accumulation it received.
-`definers manifest [ "my-project" "helper" ]` reads them: the layers
-that define that path in order, the winner last, each with its value
-after the layer and its binding position when that lies in the
-layer's file. A layer returning `prev.x // { ... }` carries the names
-under `x` without defining them. A lib carries a manifest per evaluation phase: `libManifest` is
-filled in here, and `pkgsManifest` and `evalManifest` are present and
-null, for the layers that build package sets and module evaluations
-to fill in on the libraries they hand out. Every stage `mkLib` builds
-carries `caisson-core.withManifests { pkgsManifest = manifest; }`,
-which rebuilds that stage from its declaration with the given phase
-manifests filled in: the same entries and `libManifest`, composed as a
-new fixpoint, so everything that reads a phase manifest through the
-fixpoint sees it. It is how the nixpkgs integration hands out
-`pkgs.lib`, the lib the package config was declared under (the
-registered lib, for a `pkgSets` entry) with `pkgsManifest` filled in.
-Only `pkgsManifest` and
-`evalManifest` are accepted, each a manifest or null, and a rebuilt
-lib carries `withManifests` too, keeping what is already filled in.
+refused where it is declared. The registered manifest lacks `pkgSets`,
+so the full manifest lists the configs without containing itself.
+caisson-core interprets nothing in them beyond the manifest shape.
 
-`caisson-core.mkConfiguration { type; evaluate; record ? { };
-perSystem ? false; }` returns
-the configuration of a module evaluation, the function of
-`{ name, parent }` above. Nothing is evaluated until the manifest that
-function returns has its `value`, `outputs` or `children` read.
-`type` is the name of the integration.
-`evaluate` performs the evaluator's call: it takes `{ lib, manifest }`,
-the lib the evaluation runs on and the manifest being built, and
-returns `value`, `outputs` and `children`, the finalized configurations
-declared beneath by integration and then name. `record` is plain data
-the integration adds to the manifest, and it may not name a field
-`mkConfiguration` writes. The evaluation has a childless view and a
-full view, each a manifest whose lib is the declaring lib rebuilt
-with that manifest as `evalManifest`. The childless view
-(`childless = true`, no `children`) is the evaluation without the
-configurations declared beneath it. The
-full view is the manifest returned; it carries the childless manifest as
-`childlessManifest`, and an integration finalizes each child against
-that (`finalizeChild { inherit name; parent =
-manifest.childlessManifest; }`), so a child's `parent` is the
-childless manifest of the configuration that declares it. The
-childless evaluation runs only when a child, or a reader of
-`childlessManifest`, reads its value, so a configuration with no
-children is evaluated once. Both views carry `type`, `name`, `parent`,
-`ancestors` (the parent's list with the parent appended), `nearest`
-(the parent's attrset with the parent under its integration, a lib
-excepted), `inputs` (the lib's manifest, and on the full view the
-childless manifest and the children) and the parent's `sources`,
-`root`, `systems`, `projects`, `defaultEcosystemSrc`, `pkgSets` and
-registries. A manifest also inherits `defaultPkgs`, the selection of
-the package set a configuration runs on, where a configuration above
-it recorded one: an integration records the selection a configuration
-makes (`record.defaultPkgs`), and it is in force for everything beneath
-that configuration until a configuration beneath records another.
-`caisson-core.finalizeTop configuration` finalizes the
-configuration a top ends with: its name is the name the composition
-declares on `mkLib`, absent when it declares none, and its parent is
-the lib's manifest.
+### History
 
-An integration that evaluates a configuration at a system passes
-`perSystem = true`. A declared configuration is then an evaluation for
-every system in force where it is declared, and the configuration
-returns those evaluations by system: as many as there are systems in
-force, also when that is a single system, and none when no system is
-in force; nothing is refused. In the tree the system sits above the
-name. Each evaluation is a manifest as described above, with the
-childless and full views, under the name it is declared by, carrying
-its system as `system`; its parent is the system, a manifest of type
-`system` named by the system, beneath the parent that declares the
-configuration. The parent's full manifest holds each system under
-`children.system`, with the evaluations declared at it by integration
-and then name, beside the configurations evaluated once for every
-system, which stay under `children.<integration>`. An evaluation sees
-the system above it without what is declared under it.
+`history` lists the events in stage order, and the history of each
+stage begins with the history of the stage before it:
 
-Where a configuration that is evaluated per system is declared inside
-another, the system of its parent is the default. A home declared
-inside a machine has, by default, one evaluation per evaluation of the
-machine, for the same system; the manifest of each machine evaluation
-holds that one system as `systems`. A parent changes this by
-returning `forChildren.systems`, the systems its per-system children
-are evaluated for: a machine that holds an image for another
-architecture states that architecture there. A configuration that is
-evaluated once can return a list the same way, to narrow what its
-children are evaluated for. The list has to come from the systems
-allowed where that parent is declared, and a system outside them is
-refused.
+| Stage | Events it adds |
+| --- | --- |
+| core | one `layer` event per caisson-core entry, then the lib overlay registrations |
+| bootstrap | one `layer` event per entry it composes that the core stage did not, in composition order: the selection, and a registration replacing a caisson-core entry, which so comes after the entry it replaces |
+| registered | the `modules`, `configs` and `pkgOverlays` registrations |
+| full | the `pkgSets` registrations |
 
-`finalizeChild` accepts either result, a manifest or the evaluations
-by system.
+Each event has:
 
-An evaluation registers modules for the configurations beneath it.
+- `manifest`, the name path, empty for the root lib;
+- `type`;
+- `operation`, `registry` or `layer`;
+- `key`;
+- `index`, its position within its operation;
+- `origin`: `project`, and `file` where the entry was built from a
+  file. A lib overlay built from a file records it as `origin`.
+
+A layer event also carries, lazily, the sides of its overlay call
+`final: prev: result`, as the stage that recorded it composed them:
+`result`, the attribute set its overlay returned, and `prev`, the
+accumulation it received.
+
+`definers manifest [ "my-project" "helper" ]` reads them. It returns
+the layers that define that path in order, the winner last, each with
+its value after the layer and its binding position when that lies in
+the file of the layer. A layer returning `prev.x // { ... }` carries
+the names under `x` without defining them.
+
+### Phase manifests
+
+A lib carries a manifest per evaluation phase. `libManifest` is
+filled in by `mkLib`. `pkgsManifest` and `evalManifest` are present
+and null, for the layers that build package sets and module
+evaluations to fill in on the libraries they hand out.
+
+Every stage `mkLib` builds carries
+`caisson-core.withManifests { pkgsManifest = manifest; }`, which
+rebuilds that stage from its declaration with the given phase
+manifests filled in: the same entries and `libManifest`, composed as
+a new fixpoint, so everything that reads a phase manifest through the
+fixpoint sees it.
+
+- It is how the nixpkgs integration hands out `pkgs.lib`: the lib the
+  package config was declared under (the registered lib, for a
+  `pkgSets` entry) with `pkgsManifest` filled in.
+- Only `pkgsManifest` and `evalManifest` are accepted, each a manifest
+  or null.
+- A rebuilt lib carries `withManifests` too, keeping what is already
+  filled in.
+
+### Configurations
+
+A configuration is a module evaluation that sits in a tree: a NixOS
+machine, a home, a flake. It learns its name and its parent from
+where it is declared, so a configuration is a function
+`{ name, parent }: <manifest>`.
+
+`caisson-core.mkConfiguration { type; evaluate; record ? { }; perSystem ? false; }`
+returns one:
+
+| Argument | Meaning |
+| --- | --- |
+| `type` | the name of the integration |
+| `evaluate` | the call of the evaluator. It takes `{ lib, manifest }`, the lib the evaluation runs on and the manifest being built, and returns `value`, `outputs` and `children`, the finalized configurations declared inside it by integration and then name |
+| `record` | plain data the integration adds to the manifest. It may not name a field `mkConfiguration` writes |
+| `perSystem` | whether the configuration is evaluated once per system (below) |
+
+Nothing is evaluated until the manifest the function returns has its
+`value`, `outputs` or `children` read.
+
+A configuration is called by `finalizeChild` or `finalizeTop`:
+
+- `finalizeChild { name; parent; } child` calls it with them, after
+  checking with `builtins.functionArgs` that its pattern names exactly
+  `name` and `parent`, and requires a manifest back, or the
+  evaluations by system of a per-system configuration.
+- `finalizeTop configuration` finalizes the configuration a top ends
+  with. Its name is the name the composition declares on `mkLib`,
+  absent when it declares none, and its parent is the manifest of the
+  lib.
+
+### Evaluating a configuration with and without its children
+
+A configuration that declares children is evaluated with them and,
+separately, without them. Each evaluation has its manifest, and each
+runs on the declaring lib rebuilt with that manifest as
+`evalManifest`.
+
+- The **full evaluation** includes the configurations declared inside
+  it. Its manifest is the one `mkConfiguration` returns, and it
+  carries the other as `childlessManifest`.
+- The **childless evaluation** (`childless = true`, no `children`)
+  leaves them out. It is what the children are built against, so what
+  a child reads of its parent does not depend on the children.
+
+An integration finalizes each child against the childless manifest
+(`finalizeChild { inherit name; parent = manifest.childlessManifest; }`),
+so the `parent` of a child is the childless manifest of the
+configuration that declares it. The childless evaluation runs only
+when a child, or a reader of `childlessManifest`, reads its value, so
+a configuration with no children is evaluated once.
+
+Each of these manifests carries:
+
+- `type`, `name` and `parent`;
+- `ancestors`, the list of the parent with the parent appended;
+- `nearest`, the attribute set of the parent with the parent under
+  its integration, a lib excepted;
+- `inputs`, the manifest of the lib, and on the full manifest the
+  childless manifest and the children;
+- from the parent: `sources`, `root`, `systems`, `projects`,
+  `defaultEcosystemSrc`, `pkgSets` and the registries;
+- `defaultPkgs`, where a configuration above recorded one (below).
+
+### Configurations evaluated per system
+
+An integration whose configurations are built for one system at a
+time, such as NixOS, passes `perSystem = true`. Such a configuration
+has one evaluation for each system it is evaluated for, and
+finalizing it returns those evaluations by system. There are as many
+as there are systems, also for a single system, and none when there
+is no system. Nothing is refused.
+
+In the tree the system sits above the name:
+
+- Each evaluation is a manifest as described above, evaluated with
+  and without its children, under the name it is declared by,
+  carrying its system as `system`.
+- Its parent is the system, a manifest of type `system` named by the
+  system, inside the parent that declares the configuration.
+- The full manifest of that parent holds each system under
+  `children.system`, with the evaluations declared at it by
+  integration and then name. Configurations evaluated once stay under
+  `children.<integration>`.
+- An evaluation sees the system above it without what is declared
+  under it.
+
+Which systems a per-system configuration is evaluated for depends on
+where it is declared:
+
+- Declared at the top, or inside a configuration evaluated once: the
+  systems that configuration passes on, which start as the `systems`
+  of `mkLib`.
+- Declared inside another per-system configuration: the system of its
+  parent, by default. A home declared inside a machine has, by
+  default, one evaluation per evaluation of the machine, for the same
+  system. The manifest of each machine evaluation holds that one
+  system as `systems`.
+- A parent changes what its children get by returning
+  `forChildren.systems` (next section).
+
+### What an evaluation gives the configurations inside it
+
 `evaluate` may return `forChildren` beside `value`, `outputs` and
-`children`: `modules`, by class and then name, and
-`defaultModuleImports`, by class a list of selections, each a function
-of a lib returning modules. They are read from the childless view and
-recorded on the manifest as `forChildren`. A configuration beneath
-inherits the registry and the selections of its parent extended by
-them: its manifest holds the registry it sees as `modules`, where a
-registration under a name already there replaces the entry, and the
-selections added above it as `defaultModuleImports`, those from the
-top first. The lib an evaluation runs on shows that registry as
-`caisson-core.modules`. `forChildren` may also hold `defaultPkgs`, a
-selection of the package set for the configurations beneath: it
-replaces the selection in force at the evaluation for everything
-beneath it, and a configuration beneath that records a selection
-replaces it in turn. Every level on the way down extends both in
-turn, so what a level gives is inherited by the configurations beneath
-it, nested ones included, until a level between replaces it. The level
-that gives it and the configurations beside that level do not inherit
-it.
+`children`. It is read from the childless evaluation and recorded on
+the manifest as `forChildren`.
+
+| Field | What it gives the configurations inside |
+| --- | --- |
+| `modules` | modules by class and then name, which join the registry those configurations see. A registration under a name already there replaces the entry |
+| `defaultModuleImports` | by class, a list of selections, each a function of a lib returning modules, added to the default selection of that class, those from the top first |
+| `defaultPkgs` | a selection of the package set for the configurations inside, in place of the selection the evaluation runs on. Null when it makes none |
+| `systems` | the systems its per-system children are evaluated for. Null when it states none |
+
+How they are inherited:
+
+- The manifest of a configuration holds the registry it sees as
+  `modules`, the selections added above it as `defaultModuleImports`,
+  and the package set selection as `defaultPkgs`. The lib an
+  evaluation runs on shows that registry as `caisson-core.modules`.
+- Every level on the way down extends or replaces them in turn. So
+  what a level gives is inherited by the configurations inside it,
+  nested ones included, until a level between replaces it.
+- The level that gives them does not inherit them, and neither do the
+  configurations beside it.
+- An integration can also record a package set selection for a
+  configuration (`record.defaultPkgs`). It applies to that
+  configuration and is inherited the same way.
+- `systems` has to come from the systems allowed where the giving
+  configuration is declared, and a system outside them is refused. A
+  machine that holds an image for another architecture states that
+  architecture there, and a configuration evaluated once can return a
+  list to narrow what its children are evaluated for.
+
+### Telling names apart: `elide`
 
 `caisson-core.elide paths` gives, for each of a set of things in a
-tree, the segments needed to tell it apart from the others. A path is
-the list of `{ type, name }` segments from the top down to the thing,
-ending in the name of the thing; a system is a segment of type
-`system`. The result has, for each path in order, the segments kept,
-as strings. The rule keeps the last segment of every path, and beyond
-it only the segments where paths that end in the same name fork: among
-those paths it drops the prefix they share, keeps the segment at which
-they first differ, and does the same within each branch. So a name
-that is alone stays bare, whatever sits above it, and names that
-collide gain what tells them apart: `hostname1` at a single system
-stays `hostname1`, and `hostname2` at `x86_64-linux` and
-`aarch64-linux` keeps the system. A segment is kept as its name, or as
-`type/name` where the branches of that fork hold the same name under
-several types. How the kept segments are written out as a name, and a
-clash between equal paths, are for whoever publishes them.
+tree, the segments needed to tell it apart from the others.
 
-Every manifest carries
-`_type = "caisson-manifest"`, and `manifestOf` finds it in whatever
-a file returns: a manifest, an attrset carrying `caisson.manifest`,
-an evaluated configuration carrying `config.caisson.manifest`, or a
-library (or a package set, through `pkgs.lib`) carrying the phase
-manifests, where the last manifest filled in is the manifest. It
-returns null when the value carries none. Higher
-layers project a flake's `libOverlays` and `modules` outputs from it,
-and the `projects` argument consumes those projections one level
-down, which is how dictionaries populate across flakes. The manifest
-carries no checks here: producers validate their manifests, and
-consuming integrations type-check on the export side.
+- A path is the list of `{ type, name }` segments from the top down
+  to the thing, ending in the name of the thing. A system is a
+  segment of type `system`.
+- The result has, for each path in order, the segments kept, as
+  strings.
+
+The rule keeps the last segment of every path, and beyond it only the
+segments where paths that end in the same name fork. Among those
+paths it drops the prefix they share, keeps the segment at which they
+first differ, and does the same within each branch.
+
+So a name that is alone stays bare, whatever sits above it, and names
+that collide gain what tells them apart: `hostname1` evaluated for a
+single system stays `hostname1`, and `hostname2` evaluated for
+`x86_64-linux` and `aarch64-linux` keeps the system.
+
+A segment is kept as its name, or as `type/name` where the branches
+of that fork hold the same name under several types. How the kept
+segments are written out as a name, and a clash between equal paths,
+are for whoever publishes them.
+
+### Finding a manifest: `manifestOf`
+
+Every manifest carries `_type = "caisson-manifest"`, and `manifestOf`
+finds it in whatever a file returns:
+
+- a manifest;
+- an attribute set carrying `caisson.manifest`;
+- an evaluated configuration carrying `config.caisson.manifest`;
+- a library, or a package set through `pkgs.lib`, carrying the phase
+  manifests, where the last manifest filled in is the manifest.
+
+It returns null when the value carries none.
+
+Higher layers project the `libOverlays` and `modules` outputs of a
+flake from the manifest, and the `projects` argument consumes those
+projections one level down, which is how dictionaries populate across
+flakes. The manifest carries no checks here: producers validate their
+manifests, and consuming integrations type-check on the export side.
 
 ## The kernel
 
