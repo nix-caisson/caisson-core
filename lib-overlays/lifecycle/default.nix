@@ -50,10 +50,10 @@ let
   # Overlay registries. A library and a package set are built the same
   # way: keyed overlays over an empty set, held in a registry that
   # merges what consumed projects contribute with what the tree
-  # registers, from which a selection is applied. The three functions
-  # below are that behavior, shared by the lib overlay registry and the
-  # package overlay registry, so a rule for one is the rule for the
-  # other:
+  # registers, from which a selection is applied. `rekeyEntry` and
+  # `linkRegistry` below, with the walk of `compose`, are that
+  # behavior, shared by the lib overlay registry and the package
+  # overlay registry, so a rule for one is the rule for the other:
   #
   #   - An entry is `{ imports ? [ ]; overlay; }` under a name, and its
   #     key is its name in the registry of the tree that composes it.
@@ -135,47 +135,12 @@ let
     in
     registry;
 
-  # Walk a selection: each entry after the entries it imports, depth
-  # first. A key takes the position of its first occurrence and the
-  # value of its last; the imports of a later occurrence are walked
-  # where it occurs. A key on the path of the walk is skipped, so a
-  # cycle ends. Two occurrences of a key built from different files
-  # are refused, since one key names one entry; an entry built from a
-  # function records no file and is not told apart. The result is
-  # `{ order; entries; }`: the keys in order and the entry of each.
-  walkSelection =
-    what: selection:
-    let
-      go =
-        state: stack: entry:
-        let
-          k = entry.key;
-          prior = state.entries.${k};
-          origin = entry.origin or null;
-          priorOrigin = prior.origin or null;
-          afterImports = builtins.foldl' (s: i: go s (stack ++ [ k ]) i) state (entry.imports or [ ]);
-        in
-        if builtins.elem k stack then
-          state
-        else if state.entries ? ${k} && origin != null && priorOrigin != null && origin != priorOrigin then
-          builtins.throw ''
-            caisson-core: two different ${what}s are composed under the key `${k}`,
-            from `${priorOrigin}` and from `${origin}`. One key names one entry:
-            give one of them another name, or register the entry you mean under
-            that key.
-          ''
-        else
-          {
-            entries = afterImports.entries // {
-              ${k} = entry;
-            };
-            order = if afterImports.entries ? ${k} then afterImports.order else afterImports.order ++ [ k ];
-          };
-    in
-    builtins.foldl' (s: e: go s [ ] e) {
-      entries = { };
-      order = [ ];
-    } selection;
+  # A selection of either kind is walked by `compose`, the primitive
+  # in lib/default.nix: each entry after the entries it imports, a key
+  # at the position of its first occurrence with the value of its
+  # last, and two occurrences built from different files refused.
+  # `mkLib` applies the result as the library; `pkgOverlaysFor` reads
+  # the order and the entries from the same walk and applies nothing.
 
   # Compose registered overlays into a library. The seed is the empty
   # attribute set: nothing is composed over, and everything a library
@@ -276,18 +241,7 @@ let
     # The whole `compose` result: the lib, and `meta` with the keyed
     # order, which is computed from keys and imports alone, so reading
     # it applies no overlay.
-    overlays:
-    let
-      entries = builtins.concatMap flattenOverlay overlays;
-      # The keyed entries the selection reaches, walked for a key
-      # that two different files claim.
-      walked = walkSelection "lib overlay" (
-        builtins.concatMap (entry: if entry.key == null then entry.imports else [ entry ]) entries
-      );
-    in
-    builtins.seq walked.order (compose {
-      inherit entries;
-    });
+    overlays: compose { entries = builtins.concatMap flattenOverlay overlays; };
 
   mkExtendedLib = overlays: (composeRegistered { } overlays).lib;
 
@@ -425,9 +379,10 @@ let
     mkPkgOverlay;
 
   # The package overlays a selection applies, in order, as the list of
-  # overlays to hand a package set: the selection walked by
-  # `walkSelection`, the walk a lib overlay selection takes. The
-  # entries come from the registry, where they are keyed and linked.
+  # overlays to hand a package set: the selection walked by `compose`,
+  # the walk a lib overlay selection takes, read from its `meta` so
+  # that nothing is applied. The entries come from the registry, where
+  # they are keyed and linked.
   pkgOverlaysFor =
     selection:
     let
@@ -447,9 +402,9 @@ let
       builtins.throw "caisson-core.pkgOverlaysFor expects a list of package overlay entries (e.g. `[ registry.default ]`), but got a ${builtins.typeOf selection}."
     else
       let
-        walked = walkSelection "package overlay" (builtins.map check selection);
+        walked = (compose { entries = builtins.map check selection; }).meta;
       in
-      builtins.map (key: walked.entries.${key}.overlay) walked.order;
+      builtins.map (key: walked.winners.${key}.overlay) walked.order;
 
   moduleMap =
     f: module:
