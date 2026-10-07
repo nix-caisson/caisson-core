@@ -42,7 +42,7 @@
 #     a fixpoint whose attribute names depend on itself diverges.
 #
 # This file and the overlays use builtins only, on purpose.  Nothing
-# here may reference nixpkgs' library (or any other library).
+# here may reference a library from outside this tree.
 
 let
 

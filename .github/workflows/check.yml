@@ -15,7 +15,7 @@ jobs:
           # project targets the Nix everyone else runs.
           determinate: false
       # The builtins-only rule: nothing under lib/ or lib-overlays/
-      # reaches for nixpkgs' `lib` or a `pkgs`. Nix's parser rejects a
+      # reaches for a `lib` or a `pkgs` from outside. Nix's parser rejects a
       # free variable, so parsing every file refuses a free `lib.x` or
       # `pkgs.x` while leaving prose inside strings alone. A `lib` or
       # `pkgs` bound as an argument parses, and the tests refuse it:
