@@ -163,10 +163,8 @@ let
   names = [
     "compose"
     "resolve"
-    "kernel"
     "lifecycle"
     "readers"
-    "pins"
     "util"
   ];
 

@@ -1133,17 +1133,16 @@ let
   # mkLib and pointing here.
   mkLib =
     {
-      # Replaces `inputs`; at a flake top: inherit (caisson-core.lib.caisson-core.pins.flake inputs) sources root;
-      #
-      # The tree's pinned sources, as a pin reader returns them. A
-      # flakeless top reads its pins with pins.flake-compat or
-      # pins.npins and supplies `root` itself (pins.gitRoot). The
-      # composition's overlays and modules close over these as
-      # `closure-inputs`; a composition that pins nothing passes
-      # `sources = { };`.
+      # The tree's pinned sources, by name: each a tree with an
+      # `outPath`, and optionally `pin`, the record of how it is
+      # pinned. Reading pin files into this shape is for a reader
+      # outside caisson-core. The composition's overlays and modules
+      # close over these as `closure-inputs`; a composition that pins
+      # nothing passes `sources = { };`.
       sources,
-      # The identity of the tree being built, as pins.flake or
-      # pins.gitRoot returns it; null for a composition that is not a
+      # The identity of the tree being built: an attribute set with
+      # `outPath` and the source-info fields of the tree (`rev`,
+      # `dirty` and the like); null for a composition that is not a
       # top, a library composed inside a test or a check.
       root ? null,
       # The project's name, e.g. "my-project": the name of the
@@ -1209,8 +1208,8 @@ let
           else
             builtins.throw ''
               mkLib expects `root` to be the identity of the tree being built, an
-              attribute set with at least `outPath` (as pins.flake or pins.gitRoot
-              returns it), or null for a composition that is not a top, but got a
+              attribute set with at least `outPath`, or null for a composition that
+              is not a top, but got a
               ${if builtins.isAttrs rawRoot then "set without outPath" else builtins.typeOf rawRoot}.
             '';
 
