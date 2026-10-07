@@ -47,6 +47,136 @@ let
       sources = closure-inputs;
     };
 
+  # Overlay registries. A library and a package set are built the same
+  # way: keyed overlays over an empty set, held in a registry that
+  # merges what consumed projects contribute with what the tree
+  # registers, from which a selection is applied. The three functions
+  # below are that behavior, shared by the lib overlay registry and the
+  # package overlay registry, so a rule for one is the rule for the
+  # other:
+  #
+  #   - An entry is `{ imports ? [ ]; overlay; }` under a name, and its
+  #     key is its name in the registry of the tree that composes it.
+  #   - A project's entries join as `<project>/<name>`, and the keys
+  #     their imports carry are renamed with them, so an entry that
+  #     imports its neighbour still meets the neighbour here.
+  #   - An import is a name or an entry. A name is looked up in the
+  #     registry of the tree that registers the importer. An entry
+  #     under a key the registry holds is read from the registry, so
+  #     registering under a name replaces that entry for everything
+  #     that imports it.
+  #   - A selection applies each entry after the entries it imports
+  #     and each key once: where the key first occurs, with the value
+  #     of its last occurrence. Two entries built from different
+  #     files under one key are refused.
+
+  # Key an entry and its imports for a registry. `keyOf` maps the key
+  # an entry carried, or the name an import states, to the key or name
+  # it has here. An import that is an entry without a key gets a key
+  # derived from its importer and its position, so it keeps that
+  # position without claiming a name; the derived key holds no `/`,
+  # so it is renamed with its importer when the entry is consumed.
+  rekeyEntry =
+    keyOf: key: entry:
+    entry
+    // {
+      inherit key;
+      imports = builtins.genList (
+        i:
+        let
+          raw = builtins.elemAt (entry.imports or [ ]) i;
+          carried = raw.key or null;
+        in
+        if builtins.isString raw then
+          keyOf raw
+        else
+          rekeyEntry keyOf (if carried == null then "${key}#import-${builtins.toString i}" else keyOf carried) raw
+      ) (builtins.length (entry.imports or [ ]));
+    };
+
+  # The key an entry of the project `projectName` has in a tree that
+  # consumes the project. A key without a `/` is one of the names of
+  # the project and takes the project as prefix; a key with a `/`
+  # names an entry the project itself took from another project and
+  # keeps it, so two projects importing the same entry of a third
+  # import one entry.
+  projectKey =
+    projectName: key: if builtins.match ".*/.*" key != null then key else "${projectName}/${key}";
+
+  # Link a registry: `keyed` holds the entries under their names here,
+  # each already keyed with `rekeyEntry`. Every import becomes the
+  # entry it stands for: a name, or an entry under a registered key,
+  # becomes the registered entry; any other entry stays, with its own
+  # imports linked. `what` names the kind of overlay in the error for
+  # a name nothing registers.
+  linkRegistry =
+    what: keyed:
+    let
+      registry = builtins.mapAttrs (_name: link) keyed;
+      link =
+        entry:
+        entry
+        // {
+          imports = builtins.map (linkImport entry) (entry.imports or [ ]);
+        };
+      linkImport =
+        importer: imported:
+        if builtins.isString imported then
+          registry.${imported} or (builtins.throw ''
+            caisson-core: the ${what} `${importer.key}` imports `${imported}`, and this
+            composition registers no ${what} under that name. It registers:
+            ${builtins.concatStringsSep ", " (builtins.attrNames registry)}.
+            An entry of a consumed project is named `<project>/<name>`.
+          '')
+        else if registry ? ${imported.key} then
+          registry.${imported.key}
+        else
+          link imported;
+    in
+    registry;
+
+  # Walk a selection: each entry after the entries it imports, depth
+  # first. A key takes the position of its first occurrence and the
+  # value of its last; the imports of a later occurrence are walked
+  # where it occurs. A key on the path of the walk is skipped, so a
+  # cycle ends. Two occurrences of a key built from different files
+  # are refused, since one key names one entry; an entry built from a
+  # function records no file and is not told apart. The result is
+  # `{ order; entries; }`: the keys in order and the entry of each.
+  walkSelection =
+    what: selection:
+    let
+      go =
+        state: stack: entry:
+        let
+          k = entry.key;
+          prior = state.entries.${k};
+          origin = entry.origin or null;
+          priorOrigin = prior.origin or null;
+          afterImports = builtins.foldl' (s: i: go s (stack ++ [ k ]) i) state (entry.imports or [ ]);
+        in
+        if builtins.elem k stack then
+          state
+        else if state.entries ? ${k} && origin != null && priorOrigin != null && origin != priorOrigin then
+          builtins.throw ''
+            caisson-core: two different ${what}s are composed under the key `${k}`,
+            from `${priorOrigin}` and from `${origin}`. One key names one entry:
+            give one of them another name, or register the entry you mean under
+            that key.
+          ''
+        else
+          {
+            entries = afterImports.entries // {
+              ${k} = entry;
+            };
+            order = if afterImports.entries ? ${k} then afterImports.order else afterImports.order ++ [ k ];
+          };
+    in
+    builtins.foldl' (s: e: go s [ ] e) {
+      entries = { };
+      order = [ ];
+    } selection;
+
   # Compose registered overlays into a library. The seed is the empty
   # attribute set: nothing is composed over, and everything a library
   # holds arrives as an entry. A keyed overlay keeps its key, so
@@ -55,79 +185,90 @@ let
   # Keyless imports are flattened in front of their importer; keyed
   # imports stay imports, which `compose` walks.
   #
-  # `registry` maps a key to the entry the composing tree registers
-  # under it. An import addresses a stable identity, so an overlay
-  # built in another tree that imports an entry by key gets the entry
-  # this tree registers under that key when composed here: every keyed
-  # entry or import whose key is in the registry is read from the
-  # registry, not from the value the importer carried. A key the tree
-  # registers nothing under composes the entry the importer carried.
+  # `registry` is the linked lib overlay registry of the composing
+  # tree (see `linkRegistry`). The entries of a selection usually come
+  # from it and are linked already. A selection may also hold an entry
+  # written in place; what it imports is treated as an import of a
+  # registered entry is: a name, or an entry under a registered key,
+  # is read from the registry, and an entry without a key gets one
+  # derived from its importer. Two entries built from different files
+  # under one key are refused here, before anything is composed.
   composeRegistered =
     {
       registry ? { },
     }:
     let
       isKeyed = overlay: (overlay.key or null) != null;
-      byKey =
-        overlay:
-        if isKeyed overlay && registry ? ${overlay.key} then registry.${overlay.key} else overlay;
-      checkShape =
-        overlay:
-        if (builtins.isAttrs overlay) && (builtins.hasAttr "overlay" overlay) then
-          overlay
-        else
+      # The entry an element of a selection or of an import list
+      # stands for.
+      resolved =
+        importerKey: raw:
+        if builtins.isString raw then
+          registry.${raw} or (builtins.throw ''
+            caisson-core: ${
+              if importerKey == null then "a selected lib overlay" else "the lib overlay `${importerKey}`"
+            } imports `${raw}`, and this composition registers no lib overlay under that
+            name. It registers: ${builtins.concatStringsSep ", " (builtins.attrNames registry)}.
+          '')
+        else if !(builtins.isAttrs raw && raw ? overlay) then
           builtins.throw ''
             Library overlays are `{ imports, overlay }` attrsets (build them
             with mkLibOverlay, or use another flake's exported overlays), but
-            composition encountered a ${builtins.typeOf overlay}.
-          '';
+            composition encountered a ${builtins.typeOf raw}.
+          ''
+        else if isKeyed raw && registry ? ${raw.key} then
+          registry.${raw.key}
+        else
+          raw;
       # A keyed overlay's imports stay imports, which `compose` walks
       # before the importer; a keyless import among them gets a stable
-      # synthetic key derived from the importer key, so it keeps that
-      # position rather than falling into the keyless tail.
+      # key derived from the importer key, so it keeps that position
+      # rather than falling into the keyless tail.
       keyedImports =
         key: imports:
         builtins.genList (
           i:
           let
-            raw = checkShape (builtins.elemAt imports i);
+            entry = resolved key (builtins.elemAt imports i);
+            entryKey = if isKeyed entry then entry.key else "${key}#import-${builtins.toString i}";
           in
-          if isKeyed raw then
-            byKey raw
-          else
-            let
-              synthetic = "${key}/imports/${builtins.toString i}";
-            in
-            raw
-            // {
-              key = synthetic;
-              imports = keyedImports synthetic (raw.imports or [ ]);
-            }
+          entry
+          // {
+            key = entryKey;
+            imports = keyedImports entryKey (entry.imports or [ ]);
+          }
         ) (builtins.length imports);
       flattenOverlay =
         raw:
         let
-          overlay = byKey (checkShape raw);
-          imports = overlay.imports or [ ];
+          overlay = resolved null raw;
+          imports = builtins.map (resolved null) (overlay.imports or [ ]);
         in
         if isKeyed overlay then
           [
             {
               inherit (overlay) key;
-              imports = keyedImports overlay.key imports;
+              origin = overlay.origin or null;
+              imports = keyedImports overlay.key (overlay.imports or [ ]);
               overlay = overlay.overlay;
             }
           ]
         else
           let
             keyless = builtins.filter (i: !(isKeyed i)) imports;
-            keyed = builtins.map byKey (builtins.filter isKeyed imports);
+            keyed = builtins.filter isKeyed imports;
           in
           (builtins.concatMap flattenOverlay keyless)
           ++ [
             {
               key = null;
-              imports = keyed;
+              imports = builtins.map (
+                entry:
+                entry
+                // {
+                  imports = keyedImports entry.key (entry.imports or [ ]);
+                }
+              ) keyed;
               overlay = overlay.overlay;
             }
           ];
@@ -135,7 +276,18 @@ let
     # The whole `compose` result: the lib, and `meta` with the keyed
     # order, which is computed from keys and imports alone, so reading
     # it applies no overlay.
-    overlays: compose { entries = builtins.concatMap flattenOverlay overlays; };
+    overlays:
+    let
+      entries = builtins.concatMap flattenOverlay overlays;
+      # The keyed entries the selection reaches, walked for a key
+      # that two different files claim.
+      walked = walkSelection "lib overlay" (
+        builtins.concatMap (entry: if entry.key == null then entry.imports else [ entry ]) entries
+      );
+    in
+    builtins.seq walked.order (compose {
+      inherit entries;
+    });
 
   mkExtendedLib = overlays: (composeRegistered { } overlays).lib;
 
@@ -272,32 +424,10 @@ let
     in
     mkPkgOverlay;
 
-  # Key an entry and its imports for a registry. `keyOf` maps the key an
-  # entry carried to the key it has here; an import without a key gets
-  # a synthetic key derived from its importer's key and its position,
-  # so it keeps that position without claiming a name.
-  rekeyPkgOverlay =
-    keyOf: key: entry:
-    entry
-    // {
-      inherit key;
-      imports = builtins.genList (
-        i:
-        let
-          raw = builtins.elemAt (entry.imports or [ ]) i;
-          carried = raw.key or null;
-        in
-        rekeyPkgOverlay keyOf (if carried == null then "${key}#import-${builtins.toString i}" else keyOf carried) raw
-      ) (builtins.length (entry.imports or [ ]));
-    };
-
-  # The package overlays a selection applies, in order: each selected
-  # entry after the entries it imports, walked depth first, and each key
-  # once, where its first occurrence falls. One key reached through two
-  # paths is one entry when both carry the same origin (or either carries
-  # none, an entry built from a function); two different entries under
-  # one key are refused rather than either silently winning. The result is
-  # the list of overlays to hand a package set, in that order.
+  # The package overlays a selection applies, in order, as the list of
+  # overlays to hand a package set: the selection walked by
+  # `walkSelection`, the walk a lib overlay selection takes. The
+  # entries come from the registry, where they are keyed and linked.
   pkgOverlaysFor =
     selection:
     let
@@ -308,46 +438,18 @@ let
         else if !builtins.isString (e.key or null) then
           builtins.throw "caisson-core.pkgOverlaysFor: a selected package overlay has no key; select entries from a registry (`libManifest.pkgOverlays`), where every entry carries its registry name"
         else
-          e;
-      go =
-        state: stack: raw:
-        let
-          e = check raw;
-          k = e.key;
-          prior = state.seen.${k};
-          origin = e.origin or null;
-          priorOrigin = prior.origin or null;
-          afterImports = builtins.foldl' (s: i: go s (stack ++ [ k ]) i) state (e.imports or [ ]);
-        in
-        if builtins.elem k stack then
-          state
-        else if state.seen ? ${k} then
-          if origin != null && priorOrigin != null && origin != priorOrigin then
-            builtins.throw ''
-              caisson-core: two different package overlays are registered under the
-              key `${k}`, from `${priorOrigin}` and from `${origin}`. One key names one
-              entry: give one of them another name, or select one of them.
-            ''
-          else
-            state
-        else if afterImports.seen ? ${k} then
-          afterImports
-        else
-          afterImports
+          e
           // {
-            seen = afterImports.seen // {
-              ${k} = e;
-            };
-            order = afterImports.order ++ [ e.overlay ];
+            imports = builtins.map check (e.imports or [ ]);
           };
     in
     if !builtins.isList selection then
       builtins.throw "caisson-core.pkgOverlaysFor expects a list of package overlay entries (e.g. `[ registry.default ]`), but got a ${builtins.typeOf selection}."
     else
-      (builtins.foldl' (s: e: go s [ ] e) {
-        seen = { };
-        order = [ ];
-      } selection).order;
+      let
+        walked = walkSelection "package overlay" (builtins.map check selection);
+      in
+      builtins.map (key: walked.entries.${key}.overlay) walked.order;
 
   moduleMap =
     f: module:
@@ -1342,43 +1444,55 @@ let
             }) (builtins.attrNames attrs)
           );
 
-        # Each contributed lib overlay records the project it came from
-        # in `project`, as a package overlay entry does.
-        projectLibOverlays = builtins.foldl' (
-          acc: projectName:
-          acc
-          // builtins.mapAttrs (_: overlay: overlay // { project = projectName; }) (
-            prefixNames projectName (projects.${projectName}.libOverlays or { })
-          )
-        ) { } (builtins.attrNames projects);
+        # What consumed projects contribute to an overlay registry, for
+        # the lib overlays and the package overlays alike: each entry
+        # under `<project>/<name>`, keyed so, with the keys and names
+        # its imports carry renamed by `projectKey`. An entry that
+        # imports its neighbour therefore meets the neighbour in this
+        # registry. Each entry records the project that contributed
+        # it in `project`.
+        contributedOverlays =
+          argument:
+          builtins.foldl' (
+            acc: projectName:
+            let
+              contributed =
+                entry:
+                entry
+                // {
+                  project = projectName;
+                  imports = builtins.map (imported: if builtins.isString imported then imported else contributed imported) (
+                    entry.imports or [ ]
+                  );
+                };
+            in
+            acc
+            // builtins.mapAttrs (
+              prefixed: entry: contributed (rekeyEntry (projectKey projectName) prefixed entry)
+            ) (prefixNames projectName (projects.${projectName}.${argument} or { }))
+          ) { } (builtins.attrNames projects);
+        projectLibOverlays = contributedOverlays "libOverlays";
+        projectPkgOverlays = contributedOverlays "pkgOverlays";
 
-        # Consumed projects' package overlays, under `<project>/<name>`
-        # like their lib overlays. A project's entries and the entries
-        # they import carry the keys of the project's registry; a key
-        # without a `/` is one of the project's names and is keyed
-        # `<project>/<key>` here, so an import of a sibling still meets
-        # the sibling, and a key with a `/` names an entry the project
-        # itself took from another project and keeps it, so two
-        # projects importing the same third project's entry import one
-        # entry. Each entry records the project that contributed it.
-        projectPkgOverlays = builtins.foldl' (
-          acc: projectName:
+        # What the tree registers itself, for either registry: each
+        # entry keyed by its name, with `project` null. An entry among
+        # its imports keeps the project it carried, if any.
+        localOverlays =
+          entries:
           let
-            keyOf =
-              key: if builtins.match ".*/.*" key != null then key else "${projectName}/${key}";
-            contributed =
+            carried =
               entry:
               entry
               // {
-                project = projectName;
-                imports = builtins.map contributed (entry.imports or [ ]);
+                project = entry.project or null;
+                imports = builtins.map (imported: if builtins.isString imported then imported else carried imported) (
+                  entry.imports or [ ]
+                );
               };
           in
-          acc
-          // builtins.mapAttrs (
-            prefixed: entry: contributed (rekeyPkgOverlay keyOf prefixed entry)
-          ) (prefixNames projectName (projects.${projectName}.pkgOverlays or { }))
-        ) { } (builtins.attrNames projects);
+          builtins.mapAttrs (
+            name: entry: carried (rekeyEntry (key: key) name entry) // { project = null; }
+          ) entries;
 
         projectModules = builtins.foldl' (
           acc: projectName:
@@ -1490,27 +1604,15 @@ let
             '';
 
         # The package overlay registry: consumed projects' entries, then
-        # the local registrations, a local name winning a collision as in
-        # the lib overlay registry. An entry's key is its registry name.
-        # Every entry records where it came from in `project`: null for a
-        # local registration, the project's name for a contributed entry,
-        # so an export selector can keep the local entries alone with a
-        # filter on that field.
-        registeredPkgOverlays =
-          projectPkgOverlays
-          // builtins.mapAttrs (
-            name: entry:
-            let
-              local =
-                e:
-                e
-                // {
-                  project = e.project or null;
-                  imports = builtins.map local (e.imports or [ ]);
-                };
-            in
-            local (rekeyPkgOverlay (key: key) name entry)
-          ) localPkgOverlays;
+        # the local registrations, a local name winning a collision,
+        # linked as the lib overlay registry is. An entry's key is its
+        # registry name. Every entry records where it came from in
+        # `project`: null for a local registration, the project's name
+        # for a contributed entry, so an export selector can keep the
+        # local entries alone with a filter on that field.
+        registeredPkgOverlays = linkRegistry "package overlay" (
+          projectPkgOverlays // localOverlays localPkgOverlays
+        );
 
         # The same construction as the composition's
         # `caisson-core.mkLibOverlay`, bound before the fixpoint
@@ -1549,10 +1651,10 @@ let
         # caisson-core publishes into every composition, which this
         # composition did not register either. An export selector keeps
         # the local entries with a filter on `project == null`.
-        registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
-          forcedLibOverlays
+        registeredLibOverlays = linkRegistry "lib overlay" (
+          builtins.mapAttrs (name: entry: rekeyEntry (key: key) name entry) forcedLibOverlays
           // projectLibOverlays
-          // builtins.mapAttrs (_: overlay: overlay // { project = null; }) libOverlays
+          // localOverlays libOverlays
         );
 
         # caisson-core's forced entries as the core stage composes them:
