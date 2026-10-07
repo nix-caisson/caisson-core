@@ -473,8 +473,7 @@ let
       composed.sawDeep == "de" && composed.sawDeeper == "d";
 
     # Nothing is composed over: a composition with no source declared
-    # is a bare library that composes fine until something imports the
-    # nixpkgs-lib entry.
+    # is a bare library: caisson-core ships no entry that needs one.
     lifecycleBareCompositionNeedsNoSource =
       let
         composed = core.mkLib { sources = { }; };
@@ -498,20 +497,22 @@ let
       in
       composed.marker == 1 && composed.x == 2;
 
-    # The nixpkgs-lib entry: composed where an overlay imports it,
+    # An entry that loads a library from a source (the fixture
+    # `lib-from-source`, which reads the source of the ecosystem
+    # `probe-lib` from `prev`): composed where an overlay imports it,
     # from the declared source, as that source fixes it: a later
     # overlay's definition is seen by readers of the composed lib and
     # not by the upstream function that reads the name internally.
-    lifecycleNixpkgsLibEntryComposesFromTheDeclaredSource =
+    lifecycleSourceLibraryEntryComposesFromTheDeclaredSource =
       let
         composed = core.mkLib {
           sources = { };
-          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+          defaultEcosystemSrc.probe-lib = ./fixtures/nixpkgs-lib-stub;
           libOverlays = lib: {
             probe = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
+              { mkLibOverlay, ... }:
               {
-                imports = [ entries.nixpkgs-lib ];
+                imports = [ (mkLibOverlay ./fixtures/lib-from-source // { key = "lib-from-source"; }) ];
                 overlay = final: _prev: {
                   viaUpstream = final.stubIncrement 1;
                   stubIncrement = n: n + 100;
@@ -523,103 +524,82 @@ let
       in
       composed.viaUpstream == 101 && composed.stubReadsSelf == 11 && composed ? extend;
 
-    lifecycleNixpkgsLibEntryDerivesFromTheNixpkgsSource =
-      let
-        composed = core.mkLib {
-          sources = { };
-          defaultEcosystemSrc.nixpkgs = ./fixtures/nixpkgs-lib-stub;
-          libOverlays = lib: {
-            probe = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
-              {
-                imports = [ entries.nixpkgs-lib ];
-                overlay = _final: _prev: { };
-              }
-            );
-          };
-        };
-      in
-      composed.stubIncrement 1 == 2;
-
-    # The manifest says where the `nixpkgs-lib` layer comes from by
-    # pointing at the file of caisson-core that materializes it: the
-    # registration and, where the entry is composed, the layer both
-    # carry that file as their origin. `mkNixpkgsLibEntry`, the same
-    # entry over a source the caller names, carries it too.
-    lifecycleNixpkgsLibEntryRecordsThePolyfillFileAsItsOrigin =
+    # The registration and the layer of such an entry record the file
+    # it was built from and the project that registered it.
+    lifecycleSourceLibraryEntryRecordsItsFile =
       let
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
-          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+          defaultEcosystemSrc.probe-lib = ./fixtures/nixpkgs-lib-stub;
           libOverlays = lib: {
-            probe = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
-              {
-                imports = [ entries.nixpkgs-lib ];
-                overlay = _final: _prev: { };
-              }
-            );
+            lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
           };
         };
         history = composed.caisson-core.libManifest.history;
         eventOf =
           operation: key:
           builtins.head (builtins.filter (e: e.operation == operation && e.key == key) history);
-        polyfill = builtins.toString ../lib-overlays/nixpkgs-lib;
         origin = {
-          project = "caisson-core";
-          file = polyfill;
+          project = "probe-project";
+          file = builtins.toString ./fixtures/lib-from-source;
         };
       in
-      builtins.pathExists (polyfill + "/default.nix")
-      && (eventOf "registry" "libOverlays.nixpkgs-lib").origin == origin
-      && (eventOf "layer" "nixpkgs-lib").origin == origin
-      && (core.mkNixpkgsLibEntry ./fixtures/nixpkgs-lib-stub).origin == polyfill
+      (eventOf "registry" "libOverlays.lib-from-source").origin == origin
+      && (eventOf "layer" "lib-from-source").origin == origin
       && composed.stubIncrement 1 == 2;
 
-    lifecycleNixpkgsLibEntryFailsOnlyWhereImported =
-      throws
-        (core.mkLib {
-          sources = { };
-          libOverlays = lib: {
-            probe = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
-              {
-                imports = [ entries.nixpkgs-lib ];
-                overlay = _final: _prev: { };
-              }
-            );
-          };
-        }).stubIncrement;
-
-    # An overlay built in another tree imports that tree's nixpkgs-lib
-    # entry as a value; composed here, the import is read by key from
-    # this tree's registry, so the other tree's source does not leak in.
-    lifecycleImportedPublishedEntriesResolveByKeyHere =
+    lifecycleSourceLibraryEntryFailsOnlyWhereComposed =
       let
+        withImporter =
+          importer:
+          core.mkLib {
+            sources = { };
+            libOverlays = lib: {
+              probe = lib.caisson-core.mkLibOverlay (
+                { mkLibOverlay, ... }:
+                {
+                  imports =
+                    if importer then
+                      [ (mkLibOverlay ./fixtures/lib-from-source // { key = "lib-from-source"; }) ]
+                    else
+                      [ ];
+                  overlay = _final: _prev: { composedHere = true; };
+                }
+              );
+            };
+          };
+      in
+      (withImporter false).composedHere && throws (withImporter true).composedHere;
+
+    # An overlay built in another tree and composed here loads the
+    # library from the source this tree supplies: the source of the
+    # tree that built the overlay does not leak in.
+    lifecycleSourceLibraryEntryReadsTheSourceOfTheComposingTree =
+      let
+        exported =
+          lib:
+          lib.caisson-core.mkLibOverlay (
+            { mkLibOverlay, ... }:
+            {
+              imports = [ (mkLibOverlay ./fixtures/lib-from-source // { key = "lib-from-source"; }) ];
+              overlay = final: _prev: { viaUpstream = final.stubIncrement 1; };
+            }
+          );
         otherTree = core.mkLib {
           sources = { };
-          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
-          libOverlays = lib: {
-            exported = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
-              {
-                imports = [ entries.nixpkgs-lib ];
-                overlay = final: _prev: { viaUpstream = final.stubIncrement 1; };
-              }
-            );
-          };
+          defaultEcosystemSrc.probe-lib = ./fixtures/nixpkgs-lib-stub;
+          libOverlays = lib: { exported = exported lib; };
         };
         here = core.mkLib {
           sources = { };
-          libOverlays = lib: {
-            nixpkgs-lib = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
-            borrowed = otherTree.caisson-core.libManifest.libOverlays.exported;
+          defaultEcosystemSrc.probe-lib = ./fixtures/other-lib-stub;
+          projects.other.libOverlays = {
+            inherit (otherTree.caisson-core.libManifest.libOverlays) exported;
           };
         };
       in
-      otherTree.viaUpstream == 2 && here.viaUpstream == 3;
+      otherTree.viaUpstream == 2 && here.viaUpstream == 11;
 
     # Two projects each exporting an overlay registered as `default`
     # both compose here: the compose key is the registry name in this
@@ -705,18 +685,19 @@ let
       ]
       && consumer.caisson-core.ecosystemSrc "probe" == "consumer";
 
-    # Registering under a published name replaces the entry for every
-    # importer.
-    lifecycleRegistrationReplacesThePublishedEntry =
+    # Registering under the key an overlay imports replaces the
+    # imported entry: one key names one entry, and the registration
+    # is the one composed.
+    lifecycleRegistrationReplacesAnImportedEntry =
       let
         composed = core.mkLib {
           sources = { };
           libOverlays = lib: {
-            nixpkgs-lib = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
+            lib-from-source = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
             probe = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
+              { mkLibOverlay, ... }:
               {
-                imports = [ entries.nixpkgs-lib ];
+                imports = [ (mkLibOverlay ./fixtures/lib-from-source // { key = "lib-from-source"; }) ];
                 overlay = final: _prev: { viaUpstream = final.stubIncrement 2; };
               }
             );
@@ -727,7 +708,7 @@ let
       &&
         builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
         ++ [
-          "nixpkgs-lib"
+          "lib-from-source"
           "probe"
         ];
 
@@ -902,7 +883,6 @@ let
         ++ [
           "default"
           "extra"
-          "nixpkgs-lib"
         ];
 
     readersMkLibOverlaysRefusesAStrayFile = throws (
@@ -1162,7 +1142,7 @@ let
       && manifest.root == theRoot
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
-      && builtins.attrNames manifest.libOverlays == [ "a" ] ++ coreNames ++ [ "nixpkgs-lib" ]
+      && builtins.attrNames manifest.libOverlays == [ "a" ] ++ coreNames
       && builtins.attrNames manifest.modules == [ "nixos" ]
       && manifest.modules.nixos.local.config.origin == "local";
 
@@ -1355,7 +1335,7 @@ let
       && (layer "caisson-core/lifecycle").origin.project == "caisson-core";
 
     # `nixpkgs-lib.overlays` is the lib overlay registry at the lib it
-    # is read from: the registry on that lib's manifest, published and
+    # is read from: the registry on that lib's manifest, forced and
     # consumed entries included, at the core stage (where a selection
     # reads it) and in the returned lib alike, and empty in a library
     # no mkLib built.
@@ -1378,7 +1358,7 @@ let
       in
       names composed.caisson-core.nixpkgs-lib.overlays == names composed.caisson-core.libManifest.libOverlays
       && composed.caisson-core.nixpkgs-lib.overlays ? base
-      && composed.caisson-core.nixpkgs-lib.overlays ? nixpkgs-lib
+      && composed.caisson-core.nixpkgs-lib.overlays ? "caisson-core/lifecycle"
       && names composed.coreSeen.caisson-core.nixpkgs-lib.overlays
       == names composed.caisson-core.libManifest.libOverlays
       && composed.caisson-core.nixpkgs-lib.overlays.base.key == "base"
@@ -2674,15 +2654,9 @@ let
         outer = core.mkLib { sources = { }; };
         inner = outer.caisson-core.mkLib {
           sources = { };
-          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+          defaultEcosystemSrc.probe-lib = ./fixtures/nixpkgs-lib-stub;
           libOverlays = lib: {
-            probe = lib.caisson-core.mkLibOverlay (
-              { entries, ... }:
-              {
-                imports = [ entries.nixpkgs-lib ];
-                overlay = _final: _prev: { };
-              }
-            );
+            lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
           };
         };
       in
@@ -2723,7 +2697,6 @@ let
         builtins.attrNames composed.caisson-core.libManifest.libOverlays == coreNames
         ++ [
           "dep/greeter"
-          "nixpkgs-lib"
         ]
       && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "dep";
 
@@ -2759,7 +2732,6 @@ let
         ++ [
           "dep/marker"
           "local"
-          "nixpkgs-lib"
         ];
 
     lifecycleLocalModulesBeatProjectModules =
@@ -2810,7 +2782,6 @@ let
       in
       registry."dep/greeter".project == "dep"
       && registry.local.project == null
-      && registry.nixpkgs-lib.project == "caisson-core"
       && registry."caisson-core/compose".project == "caisson-core"
       && builtins.filter (name: registry.${name}.project == null) (builtins.attrNames registry) == [
         "local"
@@ -2932,17 +2903,11 @@ let
 
     # Resolution reads the pinned sources: a source named exactly as
     # the ecosystem supplies it when nothing is declared.
-    lifecycleNixpkgsLibFromSources =
+    lifecycleSourceLibraryFromPinnedSources =
       (core.mkLib {
-        sources.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
+        sources.probe-lib = ./fixtures/nixpkgs-lib-stub;
         libOverlays = lib: {
-          a = lib.caisson-core.mkLibOverlay (
-            { entries, ... }:
-            {
-              imports = [ entries.nixpkgs-lib ];
-              overlay = _final: _prev: { };
-            }
-          );
+          lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
         };
       }).stubIncrement 1 == 2;
 
@@ -3295,7 +3260,6 @@ let
       let
         composed = core.mkLib {
           sources = { };
-          defaultEcosystemSrc.nixpkgs-lib = ./fixtures/nixpkgs-lib-stub;
         };
       in
       builtins.attrNames composed.caisson-core.pins == [

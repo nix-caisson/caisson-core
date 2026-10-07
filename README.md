@@ -106,8 +106,7 @@ core.mkLib {
   inherit (core.pins.flake inputs) sources root;
   defaultEcosystemSrc = { nixpkgs = inputs.nixpkgs; };
                           # the tree's default source per ecosystem, by
-                          # exact name; `nixpkgs` supplies the nixpkgs-lib
-                          # part unless `nixpkgs-lib` is declared separately
+                          # exact name; read back with `ecosystemSrc`
   modules = lib: { };                 # class-keyed local registrations,
                                       # given the bootstrap lib
   configs = lib: { };                 # class-keyed configurations
@@ -148,7 +147,7 @@ The rest of this section is reference, one topic per heading:
   [Selecting lib overlays](#selecting-lib-overlays),
   [Registering from directories](#registering-from-directories),
   [Module classes](#module-classes),
-  [The nixpkgs library](#the-nixpkgs-library);
+  [Libraries loaded from a source](#libraries-loaded-from-a-source);
 - what it holds: [What the composed library carries](#what-the-composed-library-carries),
   [What a registered file receives](#what-a-registered-file-receives),
   [caisson-core composes itself](#caisson-core-composes-itself),
@@ -171,7 +170,7 @@ exists because some argument of `mkLib` is a function of it.
 | Stage | What it holds | Arguments that receive it | Its manifest lacks |
 | --- | --- | --- | --- |
 | core | caisson-core's entries, with the lib overlay registry on its manifest | `libOverlays`, `libOverlayImports`, `extraLibOverlayImports` | everything below |
-| bootstrap | the core lib plus the selection, the `nixpkgs-lib` entry and every integration among them | `modules`, `configs`, `pkgOverlays` | `modules`, `moduleProjects`, `configs`, `pkgOverlays`, `pkgSets` |
+| bootstrap | the core lib plus the selection, which is where the integrations are | `modules`, `configs`, `pkgOverlays` | `modules`, `moduleProjects`, `configs`, `pkgOverlays`, `pkgSets` |
 | registered | the same entries, with those registrations on the manifest | `pkgSets` | `pkgSets` |
 | full | the registered lib plus `pkgSets` | none: `mkLib` returns it | nothing |
 
@@ -237,25 +236,26 @@ the integration that declares the class.
 - A directory for a class no composed integration declares is an
   error.
 
-### The nixpkgs library
+### Libraries loaded from a source
 
-Nothing is composed over. The nixpkgs library arrives as the
-published `nixpkgs-lib` entry, which imports the `lib` directory of
-the source supplying that part, as that source fixes it. The source
-is `defaultEcosystemSrc.nixpkgs-lib`, else `.nixpkgs`, else a pinned
-source named exactly so.
+Nothing is composed over, and caisson-core ships no entry for any
+ecosystem. A library that exists outside the tree, such as the `lib`
+of nixpkgs, arrives as an entry that some project registers. Such an
+entry loads the library from a source and merges it in, so the names
+it adds come from the source.
 
-- An overlay that needs upstream's functions imports the entry from
-  its closure: `{ entries, ... }: { imports = [ entries.nixpkgs-lib ]; ... }`.
-- A composition that declares no source fails only where that entry
-  is composed, with a message naming the declaration.
-- A polyfill composed later overrides a name for readers of the
-  composed library, and not for upstream's internal references, since
-  the `lib/default.nix` of nixpkgs exposes no way to re-tie its
-  fixpoint.
-- The core entry (`caisson-core`) and the `nixpkgs-lib` entry sit in
-  the registry under those names like any registration, so a
-  same-name registration replaces either.
+- It reads the source from `prev.caisson-core.ecosystemSrc "<name>"`
+  (see below), and so loads the library of the composition it is
+  composed into, whichever tree registered it.
+- An overlay that calls the functions of that library imports the
+  entry by key, so composing the overlay composes the entry.
+- An entry imported under a key the composing tree registers is read
+  from the registry of that tree. Registering under the key replaces
+  the entry wherever it is composed.
+- A composition that supplies no source fails only where the entry is
+  composed.
+
+caisson's `nixpkgs-lib` integration is such an entry.
 
 ### What the composed library carries
 
@@ -264,7 +264,7 @@ Under `caisson-core`:
 | Group | Names |
 | --- | --- |
 | Composition | `mkLib`, `compose`, `resolve`, `importApply`, `callConsumerFlake` |
-| Entry constructors | `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized), `mkNixpkgsLibEntry` |
+| Entry constructors | `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized) |
 | Directory readers | `mkModules`, `mkLibOverlays`, `mkPkgOverlays` |
 | Registries | the class-keyed `modules`, the class index `classes`, `nixpkgs-lib.overlays` (the `libOverlays` of the manifest, which a `libOverlayImports` selection refers into), `pkgOverlaysFor` |
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
@@ -278,8 +278,7 @@ declares, else the source it pins under that name, else null. It is
 fixed by the arguments of the `mkLib` call, so an overlay composed
 after caisson-core's entries may read it from `prev` to decide what
 it adds. An entry that a project contributes then gets the source of
-the composition it is composed into. The `nixpkgs-lib` entry
-(`lib-overlays/nixpkgs-lib`) finds its source this way.
+the composition it is composed into.
 
 ### What a registered file receives
 
@@ -287,7 +286,7 @@ A registered file takes a closure attribute set as its first argument
 list:
 
 - an overlay file takes
-  `{ closure-inputs, closure-lib, mkLibOverlay, mkModule, contributeModules, contributeClasses, entries, ... }`;
+  `{ closure-inputs, closure-lib, mkLibOverlay, mkModule, contributeModules, contributeClasses, ... }`;
 - a module file takes `{ closure-inputs, closure-lib, mkModule, ... }`.
 
 `closure-inputs` is the pinned sources of the composition.
@@ -313,7 +312,7 @@ keyed `caisson-core/<name>`. So `import caisson-core` and
 `caisson-core` inside a composed library are one definition, and each
 part is a registered entry that a same-key entry replaces.
 
-`coreEntries { sources, entries }` returns those entries for a
+`coreEntries { sources, defaultEcosystemSrc }` returns those entries for a
 composition assembled with `compose` directly.
 
 ### Projects
@@ -330,8 +329,7 @@ can keep the entries the composition registered:
 
 - A lib overlay entry carries `project`: null for a local
   registration, the name of the project for a contributed entry, and
-  `caisson-core` for the entries caisson-core publishes into every
-  composition.
+  `caisson-core` for the entries caisson-core is made of.
 - For modules the manifest holds the same under
   `moduleProjects.<class>.<name>`, beside the module dictionary,
   since a module value cannot carry a field without becoming a
