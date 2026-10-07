@@ -272,6 +272,13 @@ Under `caisson-core`:
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
 | Pins | `pins` |
 | Sources | `ecosystemSrc` |
+| Helpers | `util` |
+
+`util` holds the few helpers that code written on caisson-core needs
+and `builtins` lacks: `unique`, `zipListsWith`, `init`, `last`,
+`genAttrs`, `filterAttrs`, `hasInfix`, `functionArgs` and
+`setFunctionArgs`. With them such code can be composed in a library
+that holds no other library.
 
 `ecosystemSrc <name>` is the source the composition supplies for an
 ecosystem, by exact name: the `defaultEcosystemSrc.<name>` it
@@ -305,7 +312,7 @@ apply last and win over same-named contributions.
 
 `lib/default.nix` holds the primitive, `compose`, and composes the
 overlays under `lib-overlays/<name>/default.nix` (`compose`,
-`resolve`, `kernel`, `lifecycle`, `readers`, `pins`) over the empty
+`resolve`, `kernel`, `lifecycle`, `readers`, `pins`, `util`) over the empty
 seed into the `caisson-core` namespace.
 
 `mkLib` composes the same entries into the library of every consumer,

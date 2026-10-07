@@ -119,6 +119,7 @@ let
     "caisson-core/pins"
     "caisson-core/readers"
     "caisson-core/resolve"
+    "caisson-core/util"
   ];
 
   # An overlay declaring the classes the modules-dir fixture holds
@@ -380,6 +381,143 @@ let
       } == "S";
 
     resolveMissIsNull = resolve { name = "probe-lib"; } == null;
+
+    # `util`: the helpers a builder written on caisson-core uses in
+    # place of a library from outside.
+    utilUniqueKeepsFirstOccurrences =
+      core.util.unique [
+        "b"
+        "a"
+        "b"
+        "c"
+        "a"
+      ] == [
+        "b"
+        "a"
+        "c"
+      ]
+      && core.util.unique [ ] == [ ];
+
+    utilZipListsWithStopsAtTheShorterList =
+      core.util.zipListsWith (a: b: "${a}${b}")
+        [
+          "a"
+          "b"
+          "c"
+        ]
+        [
+          "1"
+          "2"
+        ] == [
+          "a1"
+          "b2"
+        ]
+      && core.util.zipListsWith (a: _b: a) [ ] [ 1 ] == [ ];
+
+    utilInitAndLastSplitAList =
+      let
+        list = [
+          1
+          2
+          3
+        ];
+      in
+      core.util.init list == [
+        1
+        2
+      ]
+      && core.util.last list == 3
+      && core.util.init [ 1 ] == [ ]
+      && throws (core.util.init [ ])
+      && throws (core.util.last [ ]);
+
+    utilGenAttrsNamesEachValue =
+      core.util.genAttrs [
+        "a"
+        "b"
+      ] (name: "${name}!") == {
+        a = "a!";
+        b = "b!";
+      }
+      && core.util.genAttrs [ ] (name: name) == { };
+
+    # The predicate takes the name and the value, and a value it does
+    # not look at is not forced.
+    utilFilterAttrsKeepsWhatThePredicateHolds =
+      core.util.filterAttrs (_name: value: value != { }) {
+        kept = {
+          x = 1;
+        };
+        dropped = { };
+      } == {
+        kept = {
+          x = 1;
+        };
+      }
+      &&
+        builtins.attrNames (
+          core.util.filterAttrs (name: _value: name != "dropped") {
+            kept = throw "forced";
+            dropped = throw "forced";
+          }
+        ) == [ "kept" ];
+
+    # Characters that mean something in a regular expression are taken
+    # literally.
+    utilHasInfixFindsALiteralSubstring =
+      core.util.hasInfix "/" "a/b"
+      && !(core.util.hasInfix "/" "ab")
+      && core.util.hasInfix "." "a.b"
+      && !(core.util.hasInfix "." "ab")
+      && core.util.hasInfix "a+b" "xa+by"
+      && !(core.util.hasInfix "a+b" "aab")
+      && core.util.hasInfix "[x]" "a[x]b"
+      && core.util.hasInfix "^" "a^b"
+      && core.util.hasInfix "\\" "a\\b"
+      && core.util.hasInfix "" "anything";
+
+    # A function wrapped by `setFunctionArgs` is called as the function
+    # it wraps, states the arguments it was given, and can be wrapped
+    # again; a functor that states none reports those of the function
+    # it calls.
+    utilFunctionArgsReadsPlainAndWrappedFunctions =
+      let
+        plain =
+          {
+            a,
+            b ? 1,
+          }:
+          a + b;
+        wrapped = core.util.setFunctionArgs (args: plain args) {
+          a = false;
+          c = true;
+        };
+        rewrapped = core.util.setFunctionArgs wrapped { z = true; };
+        functor = {
+          __functor = _self: plain;
+        };
+      in
+      core.util.functionArgs plain == {
+        a = false;
+        b = true;
+      }
+      && core.util.functionArgs wrapped == {
+        a = false;
+        c = true;
+      }
+      && wrapped { a = 1; } == 2
+      && core.util.functionArgs rewrapped == { z = true; }
+      && rewrapped { a = 2; } == 3
+      && core.util.functionArgs functor == {
+        a = false;
+        b = true;
+      };
+
+    utilComposedIntoMkLib =
+      (core.mkLib { sources = { }; }).caisson-core.util.unique [
+        1
+        1
+      ] == [ 1 ];
 
     callFlakeWiresInputsAndSelf =
       let
