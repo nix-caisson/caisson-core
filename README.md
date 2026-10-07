@@ -270,6 +270,16 @@ Under `caisson-core`:
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
 | Pins | `pins` |
+| Sources | `ecosystemSrc` |
+
+`ecosystemSrc <name>` is the source the composition supplies for an
+ecosystem, by exact name: the `defaultEcosystemSrc.<name>` it
+declares, else the source it pins under that name, else null. It is
+fixed by the arguments of the `mkLib` call, so an overlay composed
+after caisson-core's entries may read it from `prev` to decide what
+it adds. An entry that a project contributes then gets the source of
+the composition it is composed into. The `nixpkgs-lib` entry
+(`lib-overlays/nixpkgs-lib`) finds its source this way.
 
 ### What a registered file receives
 

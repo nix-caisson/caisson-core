@@ -10,10 +10,9 @@
 #   - Nothing is composed over: every function a library holds
 #     arrives as an entry, nixpkgs' library included (the published
 #     `nixpkgs-lib` entry, composed as upstream fixes it).
-#   - The source of that entry is the tree's declared
-#     `defaultEcosystemSrc.nixpkgs-lib` or `.nixpkgs`, or a pinned
-#     source named exactly so, through `resolve`; a miss is null, and
-#     the entry names the declaration only where it is composed.
+#   - That entry is built from `lib-overlays/nixpkgs-lib`, the file
+#     that knows which sources carry nixpkgs' library; a composition
+#     with none of them fails only where the entry is composed.
 #   - The `caisson-core` namespace is contributed by caisson-core's
 #     entries and nothing else.  The manifest (the capture of what
 #     mkLib consumed) enters through composition as a synthetic final
@@ -29,9 +28,28 @@
   entries,
   compose,
   coreEntries,
+  # The default source per ecosystem that the composition these
+  # entries are made for declares.
+  defaultEcosystemSrc ? { },
   ...
 }:
 let
+
+  # The source a composition supplies for an ecosystem, by exact name:
+  # the default it declares, else the source it pins under that name,
+  # else null. It is fixed by the arguments of the mkLib call these
+  # entries are made for and reads nothing from the composed library,
+  # so an overlay composed after caisson-core may read it from `prev`
+  # to decide what it adds. An entry a project contributes therefore
+  # gets the source of the composition that composes it, and not the
+  # source of the project that wrote it.
+  ecosystemSrc =
+    name:
+    builtins.import ../resolve/resolve.nix {
+      inherit name;
+      defaults = defaultEcosystemSrc;
+      sources = closure-inputs;
+    };
 
   # Compose registered overlays into a library. The seed is the empty
   # attribute set: nothing is composed over, and everything a library
@@ -124,40 +142,31 @@ let
 
   mkExtendedLib = overlays: (composeRegistered { } overlays).lib;
 
-  # The entry that brings nixpkgs' library into a composition: the
-  # functions of the source supplying the `nixpkgs-lib` part of the
-  # stack, as that source fixes them. (nixpkgs' lib/default.nix builds
-  # its fixpoint with a bootstrap makeExtensible that exposes `extend`
-  # only, no `__unfix__`, so the library cannot be re-tied over the
-  # composed fixpoint here; a polyfill composed later overrides a
-  # name for readers of the composed lib, not for upstream's
-  # internal references.) `src` is a tree holding nixpkgs' `lib`
-  # directory, either a nixpkgs checkout or the nixpkgs.lib mirror, or
-  # that directory itself; null means no source was declared, and the
-  # entry then fails where it is composed, naming the declaration.
-  # Published under the key `nixpkgs-lib`: an overlay that needs
-  # upstream's functions imports it, and a same-key entry replaces it.
-  mkNixpkgsLibEntry = src: {
-    key = "nixpkgs-lib";
-    imports = [ ];
-    overlay =
-      _final: prev:
-      let
-        root =
-          if src == null then
-            builtins.throw ''
-              caisson-core: the `nixpkgs-lib` entry has no source. Declare
-              `defaultEcosystemSrc.nixpkgs-lib` (the nixpkgs.lib mirror, or nixpkgs'
-              `lib` directory) or `defaultEcosystemSrc.nixpkgs` (a nixpkgs checkout)
-              in the mkLib call, or pin a source named exactly `nixpkgs-lib` or
-              `nixpkgs` in the `sources` passed to mkLib.
-            ''
-          else
-            "${src}";
-        libDir = if builtins.pathExists "${root}/lib/default.nix" then "${root}/lib" else root;
-      in
-      prev // builtins.import libDir;
-  };
+  # The entry that brings nixpkgs' library into a composition, built
+  # from the file that holds everything caisson-core knows of nixpkgs
+  # (`lib-overlays/nixpkgs-lib`): which sources carry the library and
+  # how it is loaded. The entry records that file as its `origin`, as
+  # an entry built from a file does, so the manifest points at the
+  # code that produced the layer. `closure` is what the file takes:
+  # nothing, or a source named outright as `src`.
+  nixpkgsLibFile = ../nixpkgs-lib;
+  mkNixpkgsLibEntryWith =
+    closure:
+    let
+      applied = builtins.import nixpkgsLibFile closure;
+    in
+    {
+      key = "nixpkgs-lib";
+      imports = applied.imports or [ ];
+      inherit (applied) overlay;
+      origin = builtins.toString nixpkgsLibFile;
+    };
+
+  # The same entry over a source named by the caller: a tree holding
+  # nixpkgs' `lib` directory, either a nixpkgs checkout or the
+  # nixpkgs.lib mirror, or that directory itself. Null means no source,
+  # and the entry then fails where it is composed.
+  mkNixpkgsLibEntry = src: mkNixpkgsLibEntryWith { inherit src; };
 
   # Build a composition-bound mkLibOverlay: everything passed to it
   # takes the closure attrset,
@@ -1452,29 +1461,6 @@ let
               but got a ${builtins.typeOf rawEcosystems}.
             '';
 
-        # The source supplying the `nixpkgs-lib` part of the stack: the
-        # part declared separately, else the tree's nixpkgs (one pin
-        # supplies every part), else a pinned source named exactly as
-        # either; null when nothing declares it.
-        nixpkgsLibSource =
-          let
-            # The plain function rather than the function in the
-            # composed library: the source decides what the fixpoint
-            # holds, so it cannot be read out of the fixpoint.
-            resolve = builtins.import ../resolve/resolve.nix;
-            fromPart = resolve {
-              name = "nixpkgs-lib";
-              defaults = defaultEcosystemSrc;
-              inherit sources;
-            };
-            fromNixpkgs = resolve {
-              name = "nixpkgs";
-              defaults = defaultEcosystemSrc;
-              inherit sources;
-            };
-          in
-          if fromPart != null then fromPart else fromNixpkgs;
-
         # The entries caisson-core publishes into every composition,
         # reachable from an overlay file's closure as `entries.<name>`.
         # They are read back from the registry, so a registration
@@ -1581,7 +1567,7 @@ let
 
         # caisson-core's entries, bound to this composition.
         coreOverlays = coreEntries {
-          inherit sources;
+          inherit sources defaultEcosystemSrc;
           entries = publishedEntries;
         };
 
@@ -1605,9 +1591,14 @@ let
         registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
           forcedLibOverlays
           // {
-            nixpkgs-lib = mkNixpkgsLibEntry nixpkgsLibSource // {
-              project = "caisson-core";
-            };
+            # It reads its source from the library it is composed
+            # into. Its origin is the polyfill file of
+            # caisson-core, which is the project recorded for it.
+            nixpkgs-lib =
+              mkNixpkgsLibEntryWith { }
+              // {
+                project = "caisson-core";
+              };
           }
           // projectLibOverlays
           // builtins.mapAttrs (_: overlay: overlay // { project = null; }) libOverlays
@@ -2245,6 +2236,7 @@ in
         contributeModules
         coreEntries
         definers
+        ecosystemSrc
         elide
         finalizeChild
         importApply
