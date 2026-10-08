@@ -8,24 +8,20 @@
 # Contracts, shared with `compose`:
 #
 #   - Nothing is composed over: every function a library holds
-#     arrives as an entry, nixpkgs' library included (the published
-#     `nixpkgs-lib` entry, composed as upstream fixes it).
-#   - That entry is built from `lib-overlays/nixpkgs-lib`, the file
-#     that knows which sources carry nixpkgs' library; a composition
-#     with none of them fails only where the entry is composed.
+#     arrives as an entry. caisson-core ships no entry for any
+#     ecosystem; an entry that loads a library from a source reads the
+#     source the composition supplies from `prev` (`ecosystemSrc`).
 #   - The `caisson-core` namespace is contributed by caisson-core's
 #     entries and nothing else.  The manifest (the capture of what
 #     mkLib consumed) enters through composition as a synthetic final
 #     overlay, the same channel as everything else.
 #
 # This overlay takes the bootstrap closure of caisson-core's
-# entries: the pinned sources this composition closes over, the entries it
-# publishes (`nixpkgs-lib`, in a composition mkLib builds), `compose`
+# entries: the pinned sources this composition closes over, `compose`
 # and `coreEntries`, the function that makes these entries for a
 # composition. It uses builtins only, on purpose.
 {
   closure-inputs,
-  entries,
   compose,
   coreEntries,
   # The default source per ecosystem that the composition these
@@ -59,21 +55,22 @@ let
   # Keyless imports are flattened in front of their importer; keyed
   # imports stay imports, which `compose` walks.
   #
-  # `published` maps a key to the entry the composing tree holds under
-  # it. An import addresses a stable identity, so an overlay built in
-  # another tree that imports that tree's `nixpkgs-lib` entry gets
-  # this tree's when composed here: every keyed entry or import whose
-  # key is published is read from the map, not from the value the
-  # importer carried.
+  # `registry` maps a key to the entry the composing tree registers
+  # under it. An import addresses a stable identity, so an overlay
+  # built in another tree that imports an entry by key gets the entry
+  # this tree registers under that key when composed here: every keyed
+  # entry or import whose key is in the registry is read from the
+  # registry, not from the value the importer carried. A key the tree
+  # registers nothing under composes the entry the importer carried.
   composeRegistered =
     {
-      published ? { },
+      registry ? { },
     }:
     let
       isKeyed = overlay: (overlay.key or null) != null;
       byKey =
         overlay:
-        if isKeyed overlay && published ? ${overlay.key} then published.${overlay.key} else overlay;
+        if isKeyed overlay && registry ? ${overlay.key} then registry.${overlay.key} else overlay;
       checkShape =
         overlay:
         if (builtins.isAttrs overlay) && (builtins.hasAttr "overlay" overlay) then
@@ -141,32 +138,6 @@ let
     overlays: compose { entries = builtins.concatMap flattenOverlay overlays; };
 
   mkExtendedLib = overlays: (composeRegistered { } overlays).lib;
-
-  # The entry that brings nixpkgs' library into a composition, built
-  # from the file that holds everything caisson-core knows of nixpkgs
-  # (`lib-overlays/nixpkgs-lib`): which sources carry the library and
-  # how it is loaded. The entry records that file as its `origin`, as
-  # an entry built from a file does, so the manifest points at the
-  # code that produced the layer. `closure` is what the file takes:
-  # nothing, or a source named outright as `src`.
-  nixpkgsLibFile = ../nixpkgs-lib;
-  mkNixpkgsLibEntryWith =
-    closure:
-    let
-      applied = builtins.import nixpkgsLibFile closure;
-    in
-    {
-      key = "nixpkgs-lib";
-      imports = applied.imports or [ ];
-      inherit (applied) overlay;
-      origin = builtins.toString nixpkgsLibFile;
-    };
-
-  # The same entry over a source named by the caller: a tree holding
-  # nixpkgs' `lib` directory, either a nixpkgs checkout or the
-  # nixpkgs.lib mirror, or that directory itself. Null means no source,
-  # and the entry then fails where it is composed.
-  mkNixpkgsLibEntry = src: mkNixpkgsLibEntryWith { inherit src; };
 
   # Build a composition-bound mkLibOverlay: everything passed to it
   # takes the closure attrset,
@@ -1199,8 +1170,8 @@ let
       # `lib: [ <entry> ]`: which registered overlays apply to this
       # composition, given the core lib, which carries the registry as
       # `lib.caisson-core.nixpkgs-lib.overlays.<name>`. It replaces the
-      # default selection, every registered overlay that is not a
-      # published entry.
+      # default selection, every registered overlay that is not an
+      # entry of caisson-core.
       libOverlayImports ? null,
       # `lib: [ <entry> ]`: registered overlays added to that
       # selection, whichever it is.
@@ -1301,7 +1272,7 @@ let
         rawPkgOverlays = given "pkgOverlays" (_lib: { });
         rawPkgSets = given "pkgSets" (_lib: { });
         rawLibOverlayImports = given "libOverlayImports" (
-          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays publishedNames)
+          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays coreNames)
         );
         rawExtraLibOverlayImports = given "extraLibOverlayImports" (_lib: [ ]);
         rawEcosystems = given "defaultEcosystemSrc" { };
@@ -1461,16 +1432,6 @@ let
               but got a ${builtins.typeOf rawEcosystems}.
             '';
 
-        # The entries caisson-core publishes into every composition,
-        # reachable from an overlay file's closure as `entries.<name>`.
-        # They are read back from the registry, so a registration
-        # under the same name is what importers get: replacing a
-        # published entry is registering under its name. (A replacement
-        # that imports the entry it replaces imports itself.)
-        publishedEntries = {
-          nixpkgs-lib = registeredLibOverlays.nixpkgs-lib;
-        };
-
         # `modules` and `configs` are functions of the bootstrap lib: the
         # selected entries are in it, the module registrations are not.
         modules =
@@ -1561,26 +1522,26 @@ let
             closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
             inherit contributeClasses contributeModules;
-            entries = publishedEntries;
           };
         };
 
         # caisson-core's entries, bound to this composition.
         coreOverlays = coreEntries {
           inherit sources defaultEcosystemSrc;
-          entries = publishedEntries;
         };
 
-        # The registry: the forced entries caisson-core publishes,
+        # The registry: the forced entries of caisson-core,
         # then consumed projects' overlays, then the local
         # registrations, prefixed names beside short names; a later
         # registration wins a name collision, so a local registration
-        # beats a project's registration and either beats a published
+        # beats a project's registration and either beats a forced
         # entry. A registered overlay's compose key is its registry
         # name here, whatever
         # key it carried from the tree that built it (two projects may
-        # each export a `default`), so registering under a published
-        # name replaces that entry wherever it is composed.
+        # each export a `default`), and an entry imported under a
+        # registered name is read from the registry, so registering
+        # under a name replaces the entry of that key wherever it is
+        # composed.
         #
         # Every entry records where it came from in `project`: the
         # consumed project's name for a contributed entry, null for a
@@ -1590,16 +1551,6 @@ let
         # the local entries with a filter on `project == null`.
         registeredLibOverlays = builtins.mapAttrs (name: overlay: overlay // { key = name; }) (
           forcedLibOverlays
-          // {
-            # It reads its source from the library it is composed
-            # into. Its origin is the polyfill file of
-            # caisson-core, which is the project recorded for it.
-            nixpkgs-lib =
-              mkNixpkgsLibEntryWith { }
-              // {
-                project = "caisson-core";
-              };
-          }
           // projectLibOverlays
           // builtins.mapAttrs (_: overlay: overlay // { project = null; }) libOverlays
         );
@@ -1622,12 +1573,9 @@ let
         # The selection: caisson-core's entries are always composed and
         # first; the rest is what `libOverlayImports` selects, given the
         # core lib. By default it selects the registry's project and
-        # local entries. The published entries are not in the default:
-        # `nixpkgs-lib` is composed wherever an overlay imports it, and
-        # nowhere otherwise. `compose` deduplicates by key, so an entry
+        # local entries. `compose` deduplicates by key, so an entry
         # imported twice, or a forced entry named again, composes once.
         coreNames = builtins.attrNames coreOverlays;
-        publishedNames = coreNames ++ [ "nixpkgs-lib" ];
         libOverlayImports =
           if builtins.isFunction rawLibOverlayImports then
             rawLibOverlayImports coreLib
@@ -1906,13 +1854,6 @@ let
             };
         };
 
-        published = builtins.listToAttrs (
-          builtins.map (name: {
-            inherit name;
-            value = registeredLibOverlays.${name};
-          }) publishedNames
-        );
-
         # The phase manifests a later phase fills in on a lib it hands
         # out: `pkgsManifest` on the lib inside a package set,
         # `evalManifest` on the lib a module evaluation is built with.
@@ -2002,7 +1943,7 @@ let
         coreLib = coreComposition.lib;
 
         bootstrapComposition = stage {
-          composeArgs = { inherit published; };
+          composeArgs = { registry = registeredLibOverlays; };
           overlays = importedLibOverlays;
           manifest = bootstrapManifest;
           extra = registrationConstructors;
@@ -2010,7 +1951,7 @@ let
         bootstrapLib = bootstrapComposition.lib;
 
         registeredComposition = stage {
-          composeArgs = { inherit published; };
+          composeArgs = { registry = registeredLibOverlays; };
           overlays = importedLibOverlays ++ [
             projectModulesOverlay
             localModulesOverlay
@@ -2023,7 +1964,7 @@ let
         registeredLib = registeredComposition.lib;
 
         composition = stage {
-          composeArgs = { inherit published; };
+          composeArgs = { registry = registeredLibOverlays; };
           overlays = importedLibOverlays ++ [
             projectModulesOverlay
             localModulesOverlay
@@ -2042,7 +1983,7 @@ let
         # the selection alone: the registrations and the manifest
         # compose after it as caisson-core's recording, not as
         # entries.
-        selectionMeta = (composeRegistered { inherit published; } importedLibOverlays).meta;
+        selectionMeta = (composeRegistered { registry = registeredLibOverlays; } importedLibOverlays).meta;
         entries =
           builtins.map (key: {
             inherit key;
@@ -2243,7 +2184,6 @@ in
         manifestOf
         mkExtendedLib
         mkLib
-        mkNixpkgsLibEntry
         pkgOverlaysFor
         ;
       mkConfiguration = mkConfigurationFor final;
@@ -2263,7 +2203,7 @@ in
         extraOverlayClosure = {
           closure-lib = final;
           mkModule = final.caisson-core.mkModule;
-          inherit contributeClasses contributeModules entries;
+          inherit contributeClasses contributeModules;
         };
       };
       # Seed only: overlay contributions merge in during composition,

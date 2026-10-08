@@ -171,16 +171,15 @@ let
 
   # The keyed entries of caisson-core, bound to a composition: the
   # pinned sources the composition closes over (its `closure-inputs`)
-  # and the entries it publishes (the `nixpkgs-lib` entry, in a
-  # composition mkLib builds). Each overlay file takes the closure
-  # `{ closure-inputs, entries, compose, coreEntries, ... }` and
+  # and the default source per ecosystem it declares. Each overlay
+  # file takes the closure
+  # `{ closure-inputs, defaultEcosystemSrc, compose, coreEntries, ... }` and
   # returns `{ imports ? [ ], overlay }`, the shape mkLibOverlay
   # produces; the closure is applied here by hand, since mkLibOverlay
   # is itself one of the things being composed.
   coreEntries =
     {
       sources ? { },
-      entries ? { },
       # The default source per ecosystem the composition declares.
       defaultEcosystemSrc ? { },
     }:
@@ -193,7 +192,6 @@ let
           applied = builtins.import file {
             closure-inputs = sources;
             inherit
-              entries
               compose
               coreEntries
               defaultEcosystemSrc

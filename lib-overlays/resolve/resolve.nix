@@ -5,8 +5,8 @@
 # to the caller to interpret. Priority: the explicit argument, then
 # the client's declared defaults, then the source with exactly the
 # declared name among the tree's pinned sources. A plain function, so
-# mkLib can resolve the `nixpkgs-lib` source before the fixpoint it is
-# building exists.
+# mkLib can resolve a source before the fixpoint it is building
+# exists.
 {
   name,
   explicit ? null,
