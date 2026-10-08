@@ -26,6 +26,10 @@
 #     the consumer's entry list: an entry's imports are walked before
 #     the entry itself.  The first occurrence of a key fixes its
 #     position; the last occurrence supplies its value (replacement).
+#     An entry may carry `origin`, the file it was built from; two
+#     occurrences of a key with different origins are refused, since
+#     one key names one entry. An entry with no origin replaces, and
+#     is replaced, as described.
 #     A replacement's imports are still walked, so entries it
 #     introduces join the composition, but at the walk's current end:
 #     a replacement inherits the replaced entry's position, and its
@@ -88,6 +92,18 @@ let
           state
         else if k == null then
           afterImports // { tail = afterImports.tail ++ [ e ]; }
+        else if
+          afterImports.winners ? ${k}
+          && (e.origin or null) != null
+          && (afterImports.winners.${k}.origin or null) != null
+          && e.origin != afterImports.winners.${k}.origin
+        then
+          builtins.throw ''
+            caisson-core: two different entries are composed under the key `${k}`,
+            from `${afterImports.winners.${k}.origin}` and from `${e.origin}`. One key
+            names one entry: give one of them another name, or register the entry
+            you mean under that key.
+          ''
         else
           afterImports
           // {

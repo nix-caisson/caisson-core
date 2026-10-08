@@ -145,7 +145,235 @@ let
     };
   };
 
-  results = {
+  # One behavior for both kinds of overlay. A library and a package
+  # set are the same construct: keyed overlays over an empty set, a
+  # registry merged across projects, a selection. The cases below are
+  # written once and run for each kind, so a rule that holds for one
+  # and not the other fails here. A kind says which argument of mkLib
+  # registers its entries, which constructor makes one, where the
+  # registry is read, and how the fixpoint of every registered entry
+  # is built.
+  overlayKinds = {
+    Lib = {
+      argument = "libOverlays";
+      mk = lib: lib.caisson-core.mkLibOverlay;
+      registryOf = composed: composed.caisson-core.libManifest.libOverlays;
+      # mkLib composes the library from the default selection.
+      builtFrom = composed: composed;
+    };
+    Pkg = {
+      argument = "pkgOverlays";
+      mk = lib: lib.caisson-core.mkPkgOverlay;
+      registryOf = composed: composed.caisson-core.libManifest.pkgOverlays;
+      # Nothing in caisson-core ties a package set: fold every
+      # registered entry, as an integration would.
+      builtFrom =
+        composed:
+        applyPkgOverlays (
+          composed.caisson-core.pkgOverlaysFor (builtins.attrValues composed.caisson-core.libManifest.pkgOverlays)
+        );
+    };
+  };
+
+  overlayBehavior =
+    kind:
+    let
+      # An overlay that counts how often it is applied, under `name`.
+      counting =
+        name: _final: prev: {
+          ${name} = (prev.${name} or 0) + 1;
+        };
+
+      # The entries a tree registered itself, as it exports them.
+      localOf =
+        composed:
+        let
+          registry = kind.registryOf composed;
+        in
+        builtins.removeAttrs registry (
+          builtins.filter (name: (registry.${name}.project or null) != null) (builtins.attrNames registry)
+        );
+
+      # `base` counts its applications, and `top` imports it as
+      # `importOf mk` says.
+      producerWith =
+        importOf:
+        core.mkLib {
+          sources = { };
+          ${kind.argument} =
+            lib:
+            let
+              mk = kind.mk lib;
+            in
+            {
+              base = mk ({ ... }: { overlay = counting "baseRuns"; });
+              top = mk (
+                { ... }:
+                {
+                  imports = [ (importOf mk) ];
+                  overlay = _final: prev: { topSaw = prev.baseRuns or 0; };
+                }
+              );
+            };
+        };
+      byName = producerWith (_mk: "base");
+      # A second entry built by hand and given the key of the first:
+      # how an overlay imports a neighbour without naming it.
+      byValue = producerWith (mk: mk ({ ... }: { overlay = counting "baseRuns"; }) // { key = "base"; });
+
+      consumerOf =
+        producer: extra:
+        core.mkLib {
+          sources = { };
+          projects.producer.${kind.argument} = localOf producer;
+          ${kind.argument} = lib: extra (kind.mk lib);
+        };
+
+      once = composed: (kind.builtFrom composed).baseRuns == 1 && (kind.builtFrom composed).topSaw == 1;
+    in
+    {
+      # An import may be a name, looked up in the registry of the tree
+      # that registers the importer.
+      ImportByNameMeetsTheRegisteredEntry = once byName;
+
+      # Consumed as a project, the entries and their imports take the
+      # name of the project, so the import still meets the entry the
+      # consumer registers and the entry is applied once.
+      ImportByNameIsAppliedOnceInAConsumer =
+        let
+          consumer = consumerOf byName (_mk: { });
+        in
+        once consumer
+        && builtins.attrNames (localOf consumer) == [ ]
+        && (kind.registryOf consumer) ? "producer/base"
+        && (kind.registryOf consumer) ? "producer/top";
+
+      # The same holds for an import carried as a value under the key
+      # of a registered entry.
+      ImportByValueIsAppliedOnceInAConsumer = once byValue && once (consumerOf byValue (_mk: { }));
+
+      # A tree imports an entry of a project by its name there.
+      ImportOfAProjectEntryByItsQualifiedName =
+        let
+          consumer = consumerOf byName (mk: {
+            local = mk (
+              { ... }:
+              {
+                imports = [ "producer/base" ];
+                overlay = _final: prev: { localSaw = prev.baseRuns or 0; };
+              }
+            );
+          });
+        in
+        once consumer && (kind.builtFrom consumer).localSaw == 1;
+
+      # A name nothing registers is refused, where the entry is built.
+      ImportOfAnUnregisteredNameIsRefused = throws (
+        (kind.builtFrom (
+          core.mkLib {
+            sources = { };
+            ${kind.argument} =
+              lib:
+              let
+                mk = kind.mk lib;
+              in
+              {
+                top = mk (
+                  { ... }:
+                  {
+                    imports = [ "missing" ];
+                    overlay = _final: _prev: { ran = true; };
+                  }
+                );
+              };
+          }
+        )).ran
+      );
+
+      # Registering under the name of an entry replaces it for
+      # everything that imports it.
+      RegistrationReplacesAnImportedEntry =
+        let
+          consumer = consumerOf byName (mk: {
+            "producer/base" = mk ({ ... }: { overlay = _final: _prev: { baseRuns = "replaced"; }; });
+          });
+        in
+        (kind.builtFrom consumer).baseRuns == "replaced" && (kind.builtFrom consumer).topSaw == "replaced";
+
+      # Two different files under one key that nothing registers are
+      # refused: one key names one entry.
+      DifferentEntriesUnderOneKeyAreRefused = throws (
+        builtins.attrNames (
+          kind.builtFrom (
+            core.mkLib {
+              sources = { };
+              ${kind.argument} =
+                lib:
+                let
+                  mk = kind.mk lib;
+                  importing =
+                    file:
+                    mk (
+                      { ... }:
+                      {
+                        imports = [ (mk file // { key = "shared"; }) ];
+                        overlay = _final: _prev: { };
+                      }
+                    );
+                in
+                {
+                  a = importing ./fixtures/history-overlays/base;
+                  b = importing ./fixtures/history-overlays/top;
+                };
+            }
+          )
+        )
+      );
+
+      # A key reached twice with nothing to tell the entries apart
+      # takes the position of the first and the value of the last.
+      AKeyReachedTwiceTakesTheFirstPositionAndTheLastValue =
+        let
+          composed = core.mkLib {
+            sources = { };
+            ${kind.argument} =
+              lib:
+              let
+                mk = kind.mk lib;
+                importing =
+                  value: record:
+                  mk (
+                    { ... }:
+                    {
+                      imports = [ (mk ({ ... }: { overlay = _final: _prev: { shared = value; }; }) // { key = "shared"; }) ];
+                      overlay = _final: prev: { ${record} = prev.shared; };
+                    }
+                  );
+              in
+              {
+                a = importing "first" "aSaw";
+                b = importing "last" "bSaw";
+              };
+          };
+          built = kind.builtFrom composed;
+        in
+        built.shared == "last" && built.aSaw == "last" && built.bSaw == "last";
+    };
+
+  overlayBehaviorResults = builtins.listToAttrs (
+    builtins.concatMap (
+      kindName:
+      let
+        cases = overlayBehavior overlayKinds.${kindName};
+      in
+      builtins.map (case: {
+        name = "overlays${kindName}${case}";
+        value = cases.${case};
+      }) (builtins.attrNames cases)
+    ) (builtins.attrNames overlayKinds)
+  );
+
+  results = overlayBehaviorResults // {
 
     unionOfContributions =
       let

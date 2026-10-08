@@ -146,6 +146,7 @@ The rest of this section is reference, one topic per heading:
 
 - how the library is built: [Stages](#stages),
   [Selecting lib overlays](#selecting-lib-overlays),
+  [Overlay registries](#overlay-registries),
   [Registering from directories](#registering-from-directories),
   [Module classes](#module-classes),
   [Libraries loaded from a source](#libraries-loaded-from-a-source);
@@ -198,6 +199,47 @@ A `libOverlays` registration makes its entries with
 - `libOverlayImports` replaces the default selection.
 - `extraLibOverlayImports`, of the same form, adds to the selection,
   whichever it is.
+
+### Overlay registries
+
+A library and a package set are built the same way: keyed overlays
+over an empty set, held in a registry that merges what consumed
+projects contribute with what the tree registers, from which a
+selection is applied. The lib overlay registry and the package overlay
+registry share the code for this, and the tests run every case below
+against both.
+
+- **Entry.** `{ imports ? [ ]; overlay; }` under a name. Its key is
+  its name in the registry of the tree that composes it.
+- **Projects.** The entries of a project join as `<project>/<name>`.
+  The keys their imports carry are renamed with them: a key without a
+  `/` is a name of that project and takes the project as prefix; a key
+  with a `/` names an entry the project took from another project and
+  is kept, so two projects that import the same entry import one
+  entry. A local registration wins a name collision.
+- **Imports.** An import is a name or an entry.
+  - A name is looked up in the registry of the tree that registers
+    the importer: `imports = [ "base" ];` for a neighbour,
+    `imports = [ "project/base" ];` for an entry of a consumed
+    project. A name nothing registers is an error that lists what is
+    registered.
+  - An entry under a key the registry holds is read from the
+    registry. An entry under no registered key is composed as given;
+    without a key it gets one derived from its importer.
+- **Replacement.** Because imports are read from the registry,
+  registering under a name replaces that entry for everything that
+  imports it.
+- **Selection.** Each entry is applied after the entries it imports,
+  and each key once: where the key first occurs, with the value of its
+  last occurrence.
+- **Clashes.** Two entries built from different files under one key
+  are refused. An entry built from a function records no file and is
+  not told apart.
+
+What differs between the two is who ties the fixpoint. `mkLib`
+composes the library from its selection. Nothing in caisson-core ties
+a package set: `pkgOverlaysFor selection` gives the overlays in order,
+and the layer that builds package sets applies them.
 
 ### Registering from directories
 
@@ -363,23 +405,11 @@ Every registered entry carries:
 
 A selection of the local entries alone is a filter on `project`.
 
-An entry imports a sibling from the registry of the composition that
-registered it, `closure-lib.caisson-core.libManifest.pkgOverlays.<name>`.
-
-The entries of a project are rekeyed as they join:
-
-- A key without a `/` is a name of that project and becomes
-  `<project>/<key>`, imports included, so an import still meets its
-  sibling.
-- A key with a `/` names an entry the project took from another
-  project and is kept, so two projects importing the same entry import
-  one entry.
-
-Nothing in caisson-core applies the registry. `pkgOverlaysFor
-selection` turns a list of entries into the list of overlays
-a package set applies: each entry after the entries it imports, each
-key once where it first occurs. Two entries with different origins
-under one key are refused.
+How entries are keyed, how imports are resolved and how a selection
+is walked is in [Overlay registries](#overlay-registries), and is the
+same as for lib overlays. Nothing in caisson-core applies the
+registry: `pkgOverlaysFor selection` turns a list of entries into the
+list of overlays a package set applies.
 
 By convention the entries named `default` (`default`,
 `<project>/default`) are the default selection, as for modules. The
