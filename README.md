@@ -272,13 +272,15 @@ Under `caisson-core`:
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
 | Sources | `ecosystemSrc` |
-| Helpers | `util` |
+| Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
+| Attribute sets | `attrsets.genAttrs`, `attrsets.filterAttrs` |
+| Strings | `strings.hasInfix` |
+| Functions | `functions.functionArgs`, `functions.setFunctionArgs` |
 
-`util` holds the few helpers that code written on caisson-core needs
-and `builtins` lacks: `unique`, `zipListsWith`, `init`, `last`,
-`genAttrs`, `filterAttrs`, `hasInfix`, `functionArgs` and
-`setFunctionArgs`. With them such code can be composed in a library
-that holds no other library.
+The last four rows are what code written on caisson-core needs and
+`builtins` lacks, grouped as the library of nixpkgs groups the
+functions of the same names. With them such code can be composed in a
+library that holds no other library.
 
 `ecosystemSrc <name>` is the source the composition supplies for an
 ecosystem, by exact name: the `defaultEcosystemSrc.<name>` it
@@ -312,7 +314,8 @@ apply last and win over same-named contributions.
 
 `lib/default.nix` holds the primitive, `compose`, and composes the
 overlays under `lib-overlays/<name>/default.nix` (`compose`,
-`resolve`, `lifecycle`, `readers`, `util`) over the empty
+`resolve`, `lifecycle`, `readers`, `lists`, `attrsets`, `strings`,
+`functions`) over the empty
 seed into the `caisson-core` namespace.
 
 `mkLib` composes the same entries into the library of every consumer,
