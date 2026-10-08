@@ -181,7 +181,10 @@ let
     "resolve"
     "lifecycle"
     "readers"
-    "util"
+    "lists"
+    "attrsets"
+    "strings"
+    "functions"
   ];
 
   # The keyed entries of caisson-core, bound to a composition: the
