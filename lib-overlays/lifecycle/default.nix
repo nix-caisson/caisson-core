@@ -211,7 +211,8 @@ let
   # constructor: everything passed to it takes the closure attrset
   # `{ closure-inputs, closure-lib, mkPkgOverlay, ... }:` as its first
   # arg list and returns `{ imports ? [ ], overlay }`, the lib overlay
-  # entry's shape, with `overlay = final: prev: ...` a nixpkgs overlay.
+  # entry's shape, with `overlay = final: prev: ...` an overlay of a
+  # package set.
   # An entry built from a file records the file as its `origin`, the
   # identity the selection compares when a key is reached twice; an
   # entry built from a function has none. An entry imports a sibling
@@ -264,7 +265,7 @@ let
         else
           builtins.throw ''
             ${provenance}After the closure arg list, a package overlay is an
-            `{ imports ? [ ], overlay }` attrset: put the nixpkgs overlay
+            `{ imports ? [ ], overlay }` attrset: put the package set overlay
             (`final: prev:`) under `overlay`, and the package overlays it depends
             on under `imports`. Got a ${builtins.typeOf applied} instead.
           '';
@@ -296,7 +297,7 @@ let
   # paths is one entry when both carry the same origin (or either carries
   # none, an entry built from a function); two different entries under
   # one key are refused rather than either silently winning. The result is
-  # the list of nixpkgs overlays to hand a package set, in that order.
+  # the list of overlays to hand a package set, in that order.
   pkgOverlaysFor =
     selection:
     let
@@ -491,8 +492,7 @@ let
             "a ${builtins.typeOf child}"
         }, where a configuration is expected: a function of
         `{ name, parent }` returning a manifest, as an integration's
-        `mkConfiguration` builds it (for a package config,
-        `lib.caisson.nixpkgs.mkConfiguration`).
+        `mkConfiguration` builds it.
       ''
     else
       let
@@ -1169,7 +1169,7 @@ let
       libOverlays ? null,
       # `lib: [ <entry> ]`: which registered overlays apply to this
       # composition, given the core lib, which carries the registry as
-      # `lib.caisson-core.nixpkgs-lib.overlays.<name>`. It replaces the
+      # `lib.caisson-core.libOverlays.<name>`. It replaces the
       # default selection, every registered overlay that is not an
       # entry of caisson-core.
       libOverlayImports ? null,
@@ -1180,7 +1180,8 @@ let
       # `caisson-core.mkPkgOverlay` makes an entry; usually
       # `lib: lib.caisson-core.mkPkgOverlays ./pkg-overlays`:
       # the package overlays this tree registers, keyed entries whose
-      # `overlay` is a nixpkgs overlay. Nothing here applies them; a
+      # `overlay` is an overlay of a package set. Nothing here applies
+      # them; a
       # package set selects from the registry through pkgOverlaysFor.
       pkgOverlays ? null,
       # `lib: { <name> = <package config evaluation>; }`, given the
@@ -1272,7 +1273,7 @@ let
         rawPkgOverlays = given "pkgOverlays" (_lib: { });
         rawPkgSets = given "pkgSets" (_lib: { });
         rawLibOverlayImports = given "libOverlayImports" (
-          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.nixpkgs-lib.overlays coreNames)
+          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libOverlays coreNames)
         );
         rawExtraLibOverlayImports = given "extraLibOverlayImports" (_lib: [ ]);
         rawEcosystems = given "defaultEcosystemSrc" { };
@@ -1428,7 +1429,7 @@ let
           else
             builtins.throw ''
               mkLib expects `defaultEcosystemSrc` to be an attribute set of ecosystem
-              sources keyed by their exact names (e.g. `{ nixpkgs = ...; }`),
+              sources keyed by their exact names (`{ <ecosystem> = <source>; }`),
               but got a ${builtins.typeOf rawEcosystems}.
             '';
 
@@ -1583,7 +1584,7 @@ let
             builtins.throw ''
               mkLib expects `libOverlayImports` to be a function taking the core
               lib and returning the entries to compose
-              (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
+              (`lib: [ lib.caisson-core.libOverlays.<name> ]`), but
               got a ${builtins.typeOf rawLibOverlayImports}.
             '';
         # `extraLibOverlayImports` adds to that selection, the default
@@ -1595,7 +1596,7 @@ let
             builtins.throw ''
               mkLib expects `extraLibOverlayImports` to be a function taking the
               core lib and returning the entries to compose beside the selection
-              (`lib: [ lib.caisson-core.nixpkgs-lib.overlays.<name> ]`), but
+              (`lib: [ lib.caisson-core.libOverlays.<name> ]`), but
               got a ${builtins.typeOf rawExtraLibOverlayImports}.
             '';
         importedLibOverlays =
@@ -2233,18 +2234,24 @@ in
       libManifest = (prev.caisson-core or { }).libManifest or null;
       pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
       evalManifest = (prev.caisson-core or { }).evalManifest or null;
-      # The lib overlay registry visible at this lib, by registry name:
-      # a view of the manifest's `libOverlays`, which a selection
-      # refers into (`libOverlayImports = lib: [
-      # lib.caisson-core.nixpkgs-lib.overlays.<name> ];`). Empty in a
-      # library no mkLib built.
-      nixpkgs-lib = ((prev.caisson-core or { }).nixpkgs-lib or { }) // {
-        overlays =
-          let
-            manifest = final.caisson-core.libManifest;
-          in
-          if manifest == null then { } else manifest.libOverlays or { };
-      };
+      # The registries visible at this lib, by registry name, each
+      # under the name of the mkLib argument that fills it: views of
+      # `libOverlays` and `pkgOverlays` on the manifest. A selection
+      # refers into them (`libOverlayImports = lib: [
+      # lib.caisson-core.libOverlays.<name> ];`, and a package set
+      # selects from `lib.caisson-core.pkgOverlays`). Empty in a
+      # library no mkLib built, and `pkgOverlays` is empty until the
+      # stage that registers package overlays.
+      libOverlays =
+        let
+          manifest = final.caisson-core.libManifest;
+        in
+        if manifest == null then { } else manifest.libOverlays or { };
+      pkgOverlays =
+        let
+          manifest = final.caisson-core.libManifest;
+        in
+        if manifest == null then { } else manifest.pkgOverlays or { };
     };
   };
 }

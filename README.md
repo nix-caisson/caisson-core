@@ -76,11 +76,11 @@ in
 ## Ecosystem-source resolution
 
 `resolve` implements layered lookup for handing ecosystem sources
-(such as a nixpkgs lib directory) to higher layers:
+(the tree a library or an evaluator is loaded from) to higher layers:
 
 ```nix
 core.resolve {
-  name = "nixpkgs-lib";
+  name = "some-ecosystem";
   explicit = null;        # highest priority when non-null
   defaults = { };         # the client repository's declared defaults
   sources = { };          # the pinned sources, matched by exact name only
@@ -104,7 +104,7 @@ core.mkLib {
   # modules as `closure-inputs`, and the tree's root, as a pin reader
   # returns them (see Pin readers). Only `sources` is required.
   inherit (core.pins.flake inputs) sources root;
-  defaultEcosystemSrc = { nixpkgs = inputs.nixpkgs; };
+  defaultEcosystemSrc = { some-ecosystem = inputs.some-ecosystem; };
                           # the tree's default source per ecosystem, by
                           # exact name; read back with `ecosystemSrc`
   modules = lib: { };                 # class-keyed local registrations,
@@ -115,7 +115,7 @@ core.mkLib {
   libOverlays = lib: { };             # named overlay registrations, given
                                       # the core lib; an entry is made with
                                       # lib.caisson-core.mkLibOverlay
-  libOverlayImports = lib: [ lib.caisson-core.nixpkgs-lib.overlays.my-overlay ];
+  libOverlayImports = lib: [ lib.caisson-core.libOverlays.my-overlay ];
                                       # selection for this library, given
                                       # the core lib; defaults to every
                                       # project and local registration
@@ -190,7 +190,7 @@ exists because some argument of `mkLib` is a function of it.
 
 A `libOverlays` registration makes its entries with
 `lib.caisson-core.mkLibOverlay`, and a selection refers to entries as
-`lib.caisson-core.nixpkgs-lib.overlays.<name>`.
+`lib.caisson-core.libOverlays.<name>`.
 
 - The default selection is every registered overlay that is not a
   published entry.
@@ -239,8 +239,8 @@ the integration that declares the class.
 ### Libraries loaded from a source
 
 Nothing is composed over, and caisson-core ships no entry for any
-ecosystem. A library that exists outside the tree, such as the `lib`
-of nixpkgs, arrives as an entry that some project registers. Such an
+ecosystem. A library that exists outside the tree arrives as an
+entry that some project registers. Such an
 entry loads the library from a source and merges it in, so the names
 it adds come from the source.
 
@@ -255,7 +255,8 @@ it adds come from the source.
 - A composition that supplies no source fails only where the entry is
   composed.
 
-caisson's `nixpkgs-lib` integration is such an entry.
+The caisson framework supplies such an entry for the library its
+integrations call.
 
 ### What the composed library carries
 
@@ -266,7 +267,7 @@ Under `caisson-core`:
 | Composition | `mkLib`, `compose`, `resolve`, `importApply`, `callConsumerFlake` |
 | Entry constructors | `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized) |
 | Directory readers | `mkModules`, `mkLibOverlays`, `mkPkgOverlays` |
-| Registries | the class-keyed `modules`, the class index `classes`, `nixpkgs-lib.overlays` (the `libOverlays` of the manifest, which a `libOverlayImports` selection refers into), `pkgOverlaysFor` |
+| Registries | the class-keyed `modules`, the class index `classes`, `libOverlays` and `pkgOverlays` (views of the manifest fields of those names, each under the name of the `mkLib` argument that fills it; a `libOverlayImports` selection refers into the first and a package set selects from the second), `pkgOverlaysFor` |
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
 | Pins | `pins` |
@@ -340,7 +341,7 @@ can keep the entries the composition registered:
 The package overlay registry holds package overlays in the shape of a
 lib overlay entry. A file handed to `mkPkgOverlay` takes the closure
 `{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and returns
-`{ imports ? [ ], overlay }`, where `overlay` is a nixpkgs overlay.
+`{ imports ? [ ], overlay }`, where `overlay` is an overlay of a package set (`final: prev:`).
 
 Every registered entry carries:
 
@@ -365,7 +366,7 @@ The entries of a project are rekeyed as they join:
   one entry.
 
 Nothing in caisson-core applies the registry. `pkgOverlaysFor
-selection` turns a list of entries into the list of nixpkgs overlays
+selection` turns a list of entries into the list of overlays
 a package set applies: each entry after the entries it imports, each
 key once where it first occurs. Two entries with different origins
 under one key are refused.
@@ -464,7 +465,7 @@ manifests filled in: the same entries and `libManifest`, composed as
 a new fixpoint, so everything that reads a phase manifest through the
 fixpoint sees it.
 
-- It is how the nixpkgs integration hands out `pkgs.lib`: the lib the
+- It is how a package set integration hands out `pkgs.lib`: the lib the
   package config was declared under (the registered lib, for a
   `pkgSets` entry) with `pkgsManifest` filled in.
 - Only `pkgsManifest` and `evalManifest` are accepted, each a manifest

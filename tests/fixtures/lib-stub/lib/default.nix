@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
 #
-# A stand-in for nixpkgs' `lib` directory with the shape the
-# nixpkgs-lib entry relies on: an extensible fixpoint carrying
-# `extend` and nothing else beside its functions, the way nixpkgs'
-# lib/default.nix builds itself. `stubReadsSelf` reads
+# A stand-in for the `lib` directory of an upstream library that
+# builds itself as an extensible fixpoint carrying `extend` and
+# nothing else beside its functions. `stubReadsSelf` reads
 # `stubIncrement` through self, which shows that a later override in
 # the composed lib does not reach upstream's internal references.
 let
