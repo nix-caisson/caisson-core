@@ -167,6 +167,10 @@ let
     "lifecycle"
     "readers"
     "pins"
+    "lists"
+    "attrsets"
+    "strings"
+    "functions"
   ];
 
   # The keyed entries of caisson-core, bound to a composition: the

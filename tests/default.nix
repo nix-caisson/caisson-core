@@ -113,12 +113,16 @@ let
   # The registry names of caisson-core's entries, present in every
   # mkLib composition.
   coreNames = [
+    "caisson-core/attrsets"
     "caisson-core/compose"
+    "caisson-core/functions"
     "caisson-core/kernel"
     "caisson-core/lifecycle"
+    "caisson-core/lists"
     "caisson-core/pins"
     "caisson-core/readers"
     "caisson-core/resolve"
+    "caisson-core/strings"
   ];
 
   # An overlay declaring the classes the modules-dir fixture holds
@@ -380,6 +384,143 @@ let
       } == "S";
 
     resolveMissIsNull = resolve { name = "probe-lib"; } == null;
+
+    # `lists`, `attrsets`, `strings` and `functions`: what a builder
+    # written on caisson-core uses in place of a library from outside.
+    listsUniqueKeepsFirstOccurrences =
+      core.lists.unique [
+        "b"
+        "a"
+        "b"
+        "c"
+        "a"
+      ] == [
+        "b"
+        "a"
+        "c"
+      ]
+      && core.lists.unique [ ] == [ ];
+
+    listsZipListsWithStopsAtTheShorterList =
+      core.lists.zipListsWith (a: b: "${a}${b}")
+        [
+          "a"
+          "b"
+          "c"
+        ]
+        [
+          "1"
+          "2"
+        ] == [
+          "a1"
+          "b2"
+        ]
+      && core.lists.zipListsWith (a: _b: a) [ ] [ 1 ] == [ ];
+
+    listsInitAndLastSplitAList =
+      let
+        list = [
+          1
+          2
+          3
+        ];
+      in
+      core.lists.init list == [
+        1
+        2
+      ]
+      && core.lists.last list == 3
+      && core.lists.init [ 1 ] == [ ]
+      && throws (core.lists.init [ ])
+      && throws (core.lists.last [ ]);
+
+    attrsetsGenAttrsNamesEachValue =
+      core.attrsets.genAttrs [
+        "a"
+        "b"
+      ] (name: "${name}!") == {
+        a = "a!";
+        b = "b!";
+      }
+      && core.attrsets.genAttrs [ ] (name: name) == { };
+
+    # The predicate takes the name and the value, and a value it does
+    # not look at is not forced.
+    attrsetsFilterAttrsKeepsWhatThePredicateHolds =
+      core.attrsets.filterAttrs (_name: value: value != { }) {
+        kept = {
+          x = 1;
+        };
+        dropped = { };
+      } == {
+        kept = {
+          x = 1;
+        };
+      }
+      &&
+        builtins.attrNames (
+          core.attrsets.filterAttrs (name: _value: name != "dropped") {
+            kept = throw "forced";
+            dropped = throw "forced";
+          }
+        ) == [ "kept" ];
+
+    # Characters that mean something in a regular expression are taken
+    # literally.
+    stringsHasInfixFindsALiteralSubstring =
+      core.strings.hasInfix "/" "a/b"
+      && !(core.strings.hasInfix "/" "ab")
+      && core.strings.hasInfix "." "a.b"
+      && !(core.strings.hasInfix "." "ab")
+      && core.strings.hasInfix "a+b" "xa+by"
+      && !(core.strings.hasInfix "a+b" "aab")
+      && core.strings.hasInfix "[x]" "a[x]b"
+      && core.strings.hasInfix "^" "a^b"
+      && core.strings.hasInfix "\\" "a\\b"
+      && core.strings.hasInfix "" "anything";
+
+    # A function wrapped by `setFunctionArgs` is called as the function
+    # it wraps, states the arguments it was given, and can be wrapped
+    # again; a functor that states none reports those of the function
+    # it calls.
+    functionsFunctionArgsReadsPlainAndWrappedFunctions =
+      let
+        plain =
+          {
+            a,
+            b ? 1,
+          }:
+          a + b;
+        wrapped = core.functions.setFunctionArgs (args: plain args) {
+          a = false;
+          c = true;
+        };
+        rewrapped = core.functions.setFunctionArgs wrapped { z = true; };
+        functor = {
+          __functor = _self: plain;
+        };
+      in
+      core.functions.functionArgs plain == {
+        a = false;
+        b = true;
+      }
+      && core.functions.functionArgs wrapped == {
+        a = false;
+        c = true;
+      }
+      && wrapped { a = 1; } == 2
+      && core.functions.functionArgs rewrapped == { z = true; }
+      && rewrapped { a = 2; } == 3
+      && core.functions.functionArgs functor == {
+        a = false;
+        b = true;
+      };
+
+    listsComposedIntoMkLib =
+      (core.mkLib { sources = { }; }).caisson-core.lists.unique [
+        1
+        1
+      ] == [ 1 ];
 
     callFlakeWiresInputsAndSelf =
       let
