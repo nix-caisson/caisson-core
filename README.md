@@ -101,9 +101,10 @@ modules over the empty seed, and injects the `caisson-core` namespace
 ```nix
 core.mkLib {
   # The tree's pinned sources, closed over by registered overlays and
-  # modules as `closure-inputs`, and the tree's root, as a pin reader
-  # returns them (see Pin readers). Only `sources` is required.
-  inherit (core.pins.flake inputs) sources root;
+  # modules as `closure-inputs`, and the tree's root (see Sources and
+  # the root). Only `sources` is required.
+  sources = { };
+  root = null;
   defaultEcosystemSrc = { some-ecosystem = inputs.some-ecosystem; };
                           # the tree's default source per ecosystem, by
                           # exact name; read back with `ecosystemSrc`
@@ -264,13 +265,12 @@ Under `caisson-core`:
 
 | Group | Names |
 | --- | --- |
-| Composition | `mkLib`, `compose`, `resolve`, `importApply`, `callConsumerFlake` |
+| Composition | `mkLib`, `compose`, `resolve`, `importApply` |
 | Entry constructors | `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized) |
 | Directory readers | `mkModules`, `mkLibOverlays`, `mkPkgOverlays` |
 | Registries | the class-keyed `modules`, the class index `classes`, `libOverlays` and `pkgOverlays` (views of the manifest fields of those names, each under the name of the `mkLib` argument that fills it; a `libOverlayImports` selection refers into the first and a package set selects from the second), `pkgOverlaysFor` |
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
-| Pins | `pins` |
 | Sources | `ecosystemSrc` |
 | Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
 | Attribute sets | `attrsets.genAttrs`, `attrsets.filterAttrs` |
@@ -314,8 +314,8 @@ apply last and win over same-named contributions.
 
 `lib/default.nix` holds the primitive, `compose`, and composes the
 overlays under `lib-overlays/<name>/default.nix` (`compose`,
-`resolve`, `kernel`, `lifecycle`, `readers`, `pins`, `lists`,
-`attrsets`, `strings`, `functions`) over the empty
+`resolve`, `lifecycle`, `readers`, `lists`, `attrsets`, `strings`,
+`functions`) over the empty
 seed into the `caisson-core` namespace.
 
 `mkLib` composes the same entries into the library of every consumer,
@@ -662,54 +662,25 @@ projections one level down, which is how dictionaries populate across
 flakes. The manifest carries no checks here: producers validate their
 manifests, and consuming integrations type-check on the export side.
 
-## The kernel
+## Sources and the root
 
-`callFlake { src, inputs, sourceInfo ? { } }` ships alongside
-`compose`: it applies a flake's outputs function to explicitly
-provided, already-wired inputs. No lock handling and no fetching;
-every input is a constructed flake or a plain source path.
-`callConsumerFlake` builds on it. The inputs of a lockfile'd subflake,
-what a flake-parts partition takes as `extraInputs`, are what
-`pins.flake-compat` reads (below).
+A tree is built from pinned sources. `mkLib` takes them as `sources`,
+an attribute set by name, and takes `root`, the identity of the tree
+being built. caisson-core reads no pin files: how a flake's inputs, a
+`flake.lock` or another pin system's files become `sources` and
+`root` is for a reader written on top of it (the caisson framework
+has readers for flakes, flake-compat and npins).
 
-## Pin readers
-
-A tree is built from pinned sources. `pins` holds a reader per pin
-system, each reading that system's files into `sources`: every pinned
-tree, as the pin system hands it over (a flake input keeps its
-outputs), plus `pin`, the record of how it is pinned (`system`, the
-pin `files`, `url`, `rev`, `narHash`, `lastModified`).
-
-```nix
-# In a flake's outputs: the inputs Nix resolved, with any
-# --override-input in force, and the root from `self`.
-inherit (caisson-core.pins.flake inputs) sources root;
-
-# A flake.nix and flake.lock pair Nix's flake evaluator does not see,
-# such as a tests/dependencies directory, resolved the way
-# flake-compat does: a flake input comes with its outputs. Nothing
-# overrides it and it has no root. A flake-parts partition takes these
-# sources as its `extraInputs`.
-inherit (caisson-core.pins.flake-compat ./tests/dependencies) sources;
-
-# npins (sources.json format 8).
-inherit (caisson-core.pins.npins ./npins) sources;
-```
-
-`root` names the tree being built: `{ outPath; dirty; rev; shortRev;
-dirtyRev; dirtyShortRev; lastModified; lastModifiedDate; narHash; }`,
-the source-info fields a flake's `self` carries, each null where the
-reader has none. The names are fixed and the values lazy, since
-inside a flake's `outputs` asking which attributes `self` has forces
-the outputs being computed. A flake reads it from `self`; a flakeless
-top in a git working tree reads it with `caisson-core.pins.gitRoot ./.`
-(under an impure evaluation, since the working tree is not locked),
-which gives the revision of a clean tree and marks a dirty tree.
-
-A flake input declared as a `follows` is the tree it lands on, with
-`pin.follows` naming the input path it follows. When an
-`--override-input` replaced a flake input, `pin.overridden` is true
-and `pin.url` still describes the lock.
+- A source is a tree with an `outPath`, as its pin system hands it
+  over, optionally with `pin`, the record of how it is pinned.
+- When `pin.dir` names the directory that holds the pin files and
+  that directory lies inside the root's tree, the manifest records
+  the pin files relative to the root.
+- `root` is `{ outPath; dirty; rev; … }`, the source-info fields of
+  the tree, or null for a composition that is not a top. Its out path
+  is read only for a source with a `pin.dir`, since inside a flake's
+  `outputs` the out path of `self` cannot be read while the outputs
+  are being computed.
 
 ## Tests
 
