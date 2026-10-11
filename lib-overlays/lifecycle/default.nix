@@ -1371,10 +1371,11 @@ let
             '';
 
         # Consumed projects: whole upstream contributions, registered
-        # as units.  A project value is assumed to carry `libOverlays`
-        # and class-keyed `modules` dictionaries, which a caisson-built
-        # flake's outputs already do; the shape is assumed rather than
-        # checked (producers validate their exports).  The
+        # as units.  What a project contributes is its `libOverlays`,
+        # its `pkgOverlays` and its class-keyed `modules` dictionaries,
+        # which `contributionOf` below finds in the project; the shape
+        # is assumed rather than checked (producers validate their
+        # exports).  The
         # project's overlays join the registered dictionary and its
         # modules join the registry under `<project>/<name>`, so the
         # existing selections keep per-item choice: libOverlayImports
@@ -1398,6 +1399,28 @@ let
               value = attrs.${n};
             }) (builtins.attrNames attrs)
           );
+
+        # What a project contributes: its lib overlays, its package
+        # overlays and its modules by class.
+        #
+        # A project that is built with caisson carries a manifest,
+        # which `manifestOf` finds. The manifest of its top
+        # configuration holds what the project exports, as
+        # `outputs.exports`: the entries its `exported` selectors
+        # chose. That is what is read, and the other attributes of the
+        # project are ignored. A flake built with caisson can therefore
+        # export an entry to the flakes that list it in `projects`
+        # without publishing that entry as a flake output.
+        #
+        # A project with no such manifest is read as an attribute set
+        # that holds `libOverlays`, `pkgOverlays` and `modules` itself.
+        contributionOf =
+          projectName:
+          let
+            project = projects.${projectName};
+            manifest = manifestOf project;
+          in
+          if manifest != null && (manifest.outputs or { }) ? exports then manifest.outputs.exports else project;
 
         # What consumed projects contribute to an overlay registry, for
         # the lib overlays and the package overlays alike: each entry
@@ -1424,7 +1447,7 @@ let
             acc
             // builtins.mapAttrs (
               prefixed: entry: contributed (rekeyEntry (projectKey projectName) prefixed entry)
-            ) (prefixNames projectName (projects.${projectName}.${argument} or { }))
+            ) (prefixNames projectName ((contributionOf projectName).${argument} or { }))
           ) { } (builtins.attrNames projects);
         projectLibOverlays = contributedOverlays "libOverlays";
         projectPkgOverlays = contributedOverlays "pkgOverlays";
@@ -1452,7 +1475,7 @@ let
         projectModules = builtins.foldl' (
           acc: projectName:
           let
-            classed = projects.${projectName}.modules or { };
+            classed = (contributionOf projectName).modules or { };
           in
           acc
           // builtins.listToAttrs (
@@ -1473,7 +1496,7 @@ let
         projectModuleProjects = builtins.foldl' (
           acc: projectName:
           let
-            classed = projects.${projectName}.modules or { };
+            classed = (contributionOf projectName).modules or { };
           in
           acc
           // builtins.listToAttrs (
