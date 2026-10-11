@@ -3019,6 +3019,72 @@ let
         ]
       && composed.caisson-core.libManifest.modules.nixos."dep/service".config.origin == "dep";
 
+    # A project that is built with caisson carries a manifest in its
+    # library, at `lib.caisson-core.evalManifest`. What the project
+    # exports is in that manifest, as `outputs.exports`.
+    #
+    # The project below is shaped like such a flake. Its manifest
+    # exports the module `from-manifest` and the lib overlay `marker`.
+    # Its flake outputs hold a different module, `from-flake-output`,
+    # and no lib overlay. The composition must take what the manifest
+    # exports and ignore the flake outputs.
+    lifecycleProjectIsReadFromItsManifest =
+      let
+        dep = {
+          lib.caisson-core.evalManifest = {
+            _type = "caisson-manifest";
+            outputs.exports = {
+              libOverlays.marker = {
+                imports = [ ];
+                overlay = _final: _prev: {
+                  fromTheManifest = true;
+                };
+              };
+              pkgOverlays = { };
+              modules.nixos.from-manifest = {
+                config.origin = "manifest";
+              };
+            };
+          };
+          modules.nixos.from-flake-output = {
+            config.origin = "flake output";
+          };
+        };
+        composed = core.mkLib {
+          sources = { };
+          projects = {
+            inherit dep;
+          };
+        };
+        registry = composed.caisson-core.modules.nixos;
+      in
+      builtins.attrNames registry == [ "dep/from-manifest" ]
+      && registry."dep/from-manifest".config.origin == "manifest"
+      && composed.caisson-core.libManifest.libOverlays ? "dep/marker";
+
+    # A project whose manifest holds no exports is read from its
+    # attributes, as a project with no manifest is. The manifest of a
+    # library alone is such a manifest: it is the record of a
+    # composition, and no configuration has been evaluated on it.
+    lifecycleProjectWithoutExportsIsReadFromItsAttributes =
+      let
+        dep = {
+          lib.caisson-core.libManifest = {
+            _type = "caisson-manifest";
+          };
+          modules.nixos.service = {
+            config.origin = "attribute";
+          };
+        };
+        composed = core.mkLib {
+          sources = { };
+          projects = {
+            inherit dep;
+          };
+        };
+      in
+      composed.caisson-core.modules.nixos."dep/service".config.origin == "attribute";
+
     lifecycleProjectOverlaysObeySelection =
       let
         dep = {
