@@ -2459,6 +2459,57 @@ let
         "also from the holder"
       ];
 
+    # The lib overlays an evaluation offers for the configurations
+    # beneath it are composed into the library of each of them, at any
+    # depth and through a system. They reach nothing at the evaluation
+    # itself or beside it, and an offer under the same key at a level
+    # beneath replaces the entry for what is beneath that level. The
+    # registry views of a library beneath show the offered lib
+    # overlays and package overlays.
+    lifecycleOfferedOverlaysReachWhatIsBeneath =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        offer = marker: {
+          imports = [ ];
+          overlay = _final: _prev: { offeredMarker = marker; };
+        };
+        packageOffer = {
+          imports = [ ];
+          overlay = _final: _prev: { };
+        };
+        markerOf = manifest: manifest.value.seenLib.offeredMarker or null;
+        registryOf = manifest: manifest.value.seenLib.caisson-core;
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "holder" composed (lib: {
+            forChildren.libOverlays.offered = offer "from the holder";
+            forChildren.pkgOverlays.packages = packageOffer;
+            children.stub.inner = stubIntegration "stub" lib (lib: {
+              forChildren.libOverlays.offered = offer "from inner";
+              children.stub.deep = stubIntegration "stub" lib (_lib: { });
+            });
+            children.machine.host = perSystemStubIntegration "machine" lib (_lib: { });
+          })
+        );
+        beside = composed.caisson-core.finalizeTop (stubIntegration "stub" composed (_lib: { }));
+        inner = top.children.stub.inner;
+        deep = inner.children.stub.deep;
+        host = top.children.system.x86_64-linux.children.machine.host;
+      in
+      markerOf top == null
+      && markerOf beside == null
+      && markerOf inner == "from the holder"
+      && markerOf host == "from the holder"
+      && markerOf deep == "from inner"
+      && !((registryOf top).libOverlays ? offered)
+      && (registryOf inner).libOverlays.offered.key == "offered"
+      && !((registryOf top).pkgOverlays ? packages)
+      && (registryOf inner).pkgOverlays.packages.key == "packages"
+      && (registryOf deep).pkgOverlays.packages.key == "packages";
+
     # `elide` keeps, of each path, its last segment and the segments
     # where paths that end in the same name fork. A name that is alone
     # stays bare whatever sits above it, so a system above a

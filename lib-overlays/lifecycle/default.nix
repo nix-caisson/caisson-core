@@ -611,6 +611,10 @@ let
     # that configuration, until a configuration beneath records
     # another.
     defaultPkgs = null;
+    # The lib overlays the levels above offered for the configurations
+    # beneath them, by key. The library of an evaluation is composed
+    # with them (see `stage`).
+    offeredLibOverlays = null;
     pkgSets = null;
     projects = null;
     root = null;
@@ -636,11 +640,22 @@ let
       given = parent.forChildren or { };
       modulesAbove = parent.modules or { };
       defaultsAbove = parent.defaultModuleImports or { };
+      # An overlay is registered under the key it is offered by, so
+      # an entry that imports it by that name finds it.
+      keyed = builtins.mapAttrs (key: entry: entry // { inherit key; });
+      offeredLibOverlays = keyed (given.libOverlays or { });
     in
     builtins.intersectAttrs inheritedFields parent
     // (
       if parent ? forChildren then
         {
+          # The lib overlays and package overlays the levels above
+          # registered, with what `parent` offers on top. An offer
+          # under a key the registry already holds replaces that entry
+          # beneath `parent`.
+          libOverlays = (parent.libOverlays or { }) // offeredLibOverlays;
+          pkgOverlays = (parent.pkgOverlays or { }) // keyed (given.pkgOverlays or { });
+          offeredLibOverlays = (parent.offeredLibOverlays or { }) // offeredLibOverlays;
           modules =
             modulesAbove
             // builtins.mapAttrs (class: names: (modulesAbove.${class} or { }) // names) (given.modules or { });
@@ -722,7 +737,12 @@ let
   # name). `record` is plain data the integration adds to the manifest.
   #
   # `evaluate` may also return `forChildren`, what the evaluation
-  # registers for the configurations beneath it: `modules`, by class
+  # registers for the configurations beneath it: `libOverlays`, by
+  # key, which join the lib overlay registry those configurations see
+  # and are composed into the lib each runs on, and `pkgOverlays`, by
+  # key, which join the package overlay registry they see
+  # (`caisson-core.libOverlays` and `caisson-core.pkgOverlays` of that
+  # lib); `modules`, by class
   # and then name, which join the module registry those configurations
   # see (`caisson-core.modules` of the lib each runs on), and
   # `defaultModuleImports`, by class a list of selections (functions
@@ -890,6 +910,8 @@ let
                   value = evaluated.value;
                   outputs = evaluated.outputs or { };
                   forChildren = {
+                    libOverlays = (evaluated.forChildren or { }).libOverlays or { };
+                    pkgOverlays = (evaluated.forChildren or { }).pkgOverlays or { };
                     modules = (evaluated.forChildren or { }).modules or { };
                     defaultModuleImports = (evaluated.forChildren or { }).defaultModuleImports or { };
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
@@ -1929,6 +1951,11 @@ let
                         // builtins.mapAttrs (class: names: (composed.${class} or { }) // names) (
                           evalManifest.modules or { }
                         );
+                      # The registry views of the evaluation: those of
+                      # the composition, with what the levels above
+                      # offered on top.
+                      libOverlays = (prev.caisson-core or { }).libOverlays or { } // evalManifest.libOverlays or { };
+                      pkgOverlays = (prev.caisson-core or { }).pkgOverlays or { } // evalManifest.pkgOverlays or { };
                     }
                 );
             };
@@ -1992,8 +2019,22 @@ let
             extra,
           }:
           filled:
-          composeRegistered composeArgs (
+          let
+            # The lib of an evaluation is composed with the lib
+            # overlays that the levels above the evaluation offered
+            # for the configurations beneath them. They join the
+            # registry, so an entry that imports one by its key finds
+            # it, and they compose after the selection of the
+            # composition.
+            offered =
+              if (filled.evalManifest or null) == null then
+                { }
+              else
+                filled.evalManifest.offeredLibOverlays or { };
+          in
+          composeRegistered (composeArgs // { registry = (composeArgs.registry or { }) // offered; }) (
             overlays
+            ++ builtins.attrValues offered
             ++ [
               (manifestOverlay manifest (
                 extra
