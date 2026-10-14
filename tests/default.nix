@@ -2403,19 +2403,20 @@ let
       && selectionOf giving.children.system.x86_64-linux.children.machine.host == "edge"
       && selectionOf giving.children.stub.recording == "other";
 
-    # What an evaluation registers for the configurations beneath it
-    # joins the module registry they see and the default selection of
-    # the class, at any depth and through a system. It reaches nothing
-    # at the evaluation itself or beside it, and a level beneath
-    # replaces an entry for what is beneath that level.
-    lifecycleRegistrationsReachWhatIsBeneath =
+    # What an evaluation adds to the default selection of a class
+    # (`forChildren.extraDefaultModuleImports`) is in the default of
+    # that class for the configurations beneath it, at any depth and
+    # through a system. It reaches nothing at the evaluation itself or
+    # beside it. What a level beneath adds comes after what the levels
+    # above added. The module registry is the same at every level.
+    lifecycleDefaultAdditionsReachWhatIsBeneath =
       let
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
-        seen = manifest: manifest.value.seenLib.caisson-core.modules.stub or { };
+        registry = manifest: manifest.value.seenLib.caisson-core.modules.stub or { };
         selected =
           manifest:
           builtins.concatMap (selection: selection manifest.value.seenLib) (
@@ -2423,12 +2424,9 @@ let
           );
         top = composed.caisson-core.finalizeTop (
           stubIntegration "holder" composed (lib: {
-            forChildren.modules.stub.gift = "from the holder";
-            forChildren.modules.stub.other = "also from the holder";
-            forChildren.defaultModuleImports.stub = [ (lib: [ lib.caisson-core.modules.stub.gift ]) ];
+            forChildren.extraDefaultModuleImports.stub = [ (_lib: [ "from the holder" ]) ];
             children.stub.inner = stubIntegration "stub" lib (lib: {
-              forChildren.modules.stub.gift = "from inner";
-              forChildren.defaultModuleImports.stub = [ (lib: [ lib.caisson-core.modules.stub.other ]) ];
+              forChildren.extraDefaultModuleImports.stub = [ (_lib: [ "from inner" ]) ];
               children.stub.deep = stubIntegration "stub" lib (_lib: { });
             });
             children.machine.host = perSystemStubIntegration "machine" lib (_lib: { });
@@ -2439,25 +2437,17 @@ let
         deep = inner.children.stub.deep;
         host = top.children.system.x86_64-linux.children.machine.host;
       in
-      seen top == { }
-      && seen beside == { }
-      && top.forChildren.modules.stub.gift == "from the holder"
-      && seen inner == {
-        gift = "from the holder";
-        other = "also from the holder";
-      }
-      && inner.modules.stub == seen inner
+      selected top == [ ]
+      && selected beside == [ ]
       && selected inner == [ "from the holder" ]
-      && seen host == seen inner
       && selected host == [ "from the holder" ]
-      && seen deep == {
-        gift = "from inner";
-        other = "also from the holder";
-      }
       && selected deep == [
+        "from the holder"
         "from inner"
-        "also from the holder"
-      ];
+      ]
+      && registry top == { }
+      && registry inner == { }
+      && registry deep == { };
 
     # `elide` keeps, of each path, its last segment and the segments
     # where paths that end in the same name fork. A name that is alone

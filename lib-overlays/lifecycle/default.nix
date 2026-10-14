@@ -619,11 +619,9 @@ let
   };
 
   # What a manifest beneath `parent` inherits from it: the fields
-  # above, with the module registry and the default selections
-  # extended by what `parent` registered for the configurations
-  # beneath it (`forChildren`). A registration under a name the
-  # registry already holds replaces it beneath `parent`, and a default
-  # is added after those from above. A `defaultPkgs` that `parent`
+  # above, with the default selections extended by what `parent`
+  # adds for the configurations beneath it (`forChildren`). An
+  # addition is placed after those from above. A `defaultPkgs` that `parent`
   # gives for the configurations beneath it replaces the selection in
   # force at `parent`, and the selection a configuration beneath
   # records for itself replaces that in turn. Every level on the way down
@@ -634,20 +632,16 @@ let
     parent:
     let
       given = parent.forChildren or { };
-      modulesAbove = parent.modules or { };
       defaultsAbove = parent.defaultModuleImports or { };
     in
     builtins.intersectAttrs inheritedFields parent
     // (
       if parent ? forChildren then
         {
-          modules =
-            modulesAbove
-            // builtins.mapAttrs (class: names: (modulesAbove.${class} or { }) // names) (given.modules or { });
           defaultModuleImports =
             defaultsAbove
             // builtins.mapAttrs (class: selections: (defaultsAbove.${class} or [ ]) ++ selections) (
-              given.defaultModuleImports or { }
+              given.extraDefaultModuleImports or { }
             );
           # Always present beneath such a parent, null where nothing
           # selects: listing the fields of a manifest then evaluates
@@ -722,21 +716,19 @@ let
   # name). `record` is plain data the integration adds to the manifest.
   #
   # `evaluate` may also return `forChildren`, what the evaluation
-  # registers for the configurations beneath it: `modules`, by class
-  # and then name, which join the module registry those configurations
-  # see (`caisson-core.modules` of the lib each runs on), and
-  # `defaultModuleImports`, by class a list of selections (functions
-  # of a lib returning modules), which are added to the default
-  # selection of that class beneath, and `defaultPkgs`, a selection of
-  # the package set in force beneath, null when the evaluation makes
-  # none, and `systems`, the list of systems in force beneath, null
-  # when the evaluation states none. They are read from the childless
-  # view. The configurations
-  # beneath inherit them, nested ones included, and each may replace
-  # what it inherits for itself and what is beneath it; the evaluation
-  # that gives them does not inherit them. The manifest of an evaluation
-  # holds the registry it sees as `modules` and the selections added
-  # above it as `defaultModuleImports`.
+  # gives the configurations beneath it: `extraDefaultModuleImports`,
+  # by class a list of selections (functions of a lib returning
+  # registered modules), which are added to the default selection of
+  # that class beneath; `defaultPkgs`, a selection of the package set
+  # in force beneath, null when the evaluation makes none; and
+  # `systems`, the list of systems in force beneath, null when the
+  # evaluation states none. They are read from the childless view.
+  # The configurations beneath inherit them, nested ones included.
+  # Each may replace the package set and the systems for itself and
+  # what is beneath it, and each may add to the default selections.
+  # The evaluation that gives them does not inherit them. The
+  # manifest of an evaluation holds the default selections in force
+  # at it as `defaultModuleImports`.
   #
   # The evaluation has a childless view and a full view. Each is a
   # manifest, and each runs on the lib of the declaration rebuilt
@@ -890,8 +882,7 @@ let
                   value = evaluated.value;
                   outputs = evaluated.outputs or { };
                   forChildren = {
-                    modules = (evaluated.forChildren or { }).modules or { };
-                    defaultModuleImports = (evaluated.forChildren or { }).defaultModuleImports or { };
+                    extraDefaultModuleImports = (evaluated.forChildren or { }).extraDefaultModuleImports or { };
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
                     systems = (evaluated.forChildren or { }).systems or null;
                   };
@@ -1901,9 +1892,7 @@ let
         #
         # A lib an evaluation runs on (`evalManifest` filled in) shows
         # the module registry of that evaluation: the registry of the
-        # composition, with the entries the manifest holds on top,
-        # which are the composition's registrations and what the levels
-        # above the evaluation registered for it.
+        # composition, with the entries the manifest holds on top.
         manifestOverlay = manifest: extra: {
           imports = [ ];
           overlay =
