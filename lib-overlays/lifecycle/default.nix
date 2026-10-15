@@ -256,10 +256,9 @@ let
       sources,
       # Extra attrs merged into the closure applied to overlay files;
       # the composed fixpoint (closure-lib, so an overlay's functions
-      # reach the registry of the composition that registered them),
-      # the composition's mkModule and the static contribute helpers
-      # arrive through here so overlays can contribute modules and
-      # classes closed over their flake. Bound lazily: an overlay
+      # reach the registry of the composition that registered them)
+      # and the mkModule of the composition arrive through here, closed
+      # over the flake of the overlay. Bound lazily: an overlay
       # reads them inside `overlay = final: prev:` or inside a
       # function it defines, never while it is being registered.
       extraOverlayClosure ? { },
@@ -442,46 +441,6 @@ let
     );
 
   importApply = module: staticArgs: moduleMap (m: m staticArgs) module;
-
-  # Merge module contributions into the registry from inside an
-  # overlay body: `overlay = final: prev: contributeModules prev
-  # { <class>.<name> = mkModule "<class>" ./m.nix; } // { ... }`.
-  # Static on purpose: an overlay's output attribute names must not
-  # depend on `final`, so the helper arrives through the overlay
-  # closure rather than the composed library.
-  contributeModules =
-    prev: contributions:
-    let
-      prevModules = (prev.caisson-core or { }).modules or { };
-    in
-    {
-      caisson-core = (prev.caisson-core or { }) // {
-        modules =
-          prevModules
-          // builtins.mapAttrs (class: names: (prevModules.${class} or { }) // names) contributions;
-      };
-    };
-
-  # Declare module classes from inside an overlay body, the way
-  # contributeModules contributes modules: `overlay = final: prev:
-  # contributeClasses prev { nixos = { integration = "nixos"; mkModule
-  # = final.caisson-core.mkModule "nixos"; }; } // { ... }`. The class
-  # index (`caisson-core.classes.<class>`) names, per class, the
-  # integration that owns it and the mkModule every reader registers
-  # that class through; a same-key declaration composed later
-  # replaces it, which is how an integration wrapping another takes
-  # over the class. Static like contributeModules, for the same
-  # reason.
-  contributeClasses =
-    prev: declarations:
-    let
-      prevClasses = (prev.caisson-core or { }).classes or { };
-    in
-    {
-      caisson-core = (prev.caisson-core or { }) // {
-        classes = prevClasses // declarations;
-      };
-    };
 
   # Find the manifest in whatever a file returns: a manifest itself,
   # an attrset carrying `caisson.manifest`, an evaluated configuration
@@ -1126,8 +1085,8 @@ let
   # Build a composition-bound, class-parameterized mkModule.
   # `finalLib` is the composed fixpoint (for closure-lib), bound
   # lazily; a module reaches the registry of the composition that
-  # registered it through closure-lib, under
-  # `caisson-core.modules.<class>`.
+  # registered it through closure-lib, in the manifest of that
+  # composition (`caisson-core.libManifest.modules.<class>`).
   mkModuleForComposition =
     {
       sources,
@@ -1215,8 +1174,9 @@ let
       # `lib: lib.caisson-core.mkLibOverlays ./lib-overlays`.
       libOverlays ? null,
       # `lib: [ <entry> ]`: which registered overlays apply to this
-      # composition, given the core lib, which carries the registry as
-      # `lib.caisson-core.libOverlays.<name>`. It replaces the
+      # composition, given the core lib, whose manifest holds the
+      # registry as `lib.caisson-core.libManifest.libOverlays.<name>`.
+      # It replaces the
       # default selection, every registered overlay that is not an
       # entry of caisson-core.
       libOverlayImports ? null,
@@ -1320,7 +1280,7 @@ let
         rawPkgOverlays = given "pkgOverlays" (_lib: { });
         rawPkgSets = given "pkgSets" (_lib: { });
         rawLibOverlayImports = given "libOverlayImports" (
-          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libOverlays coreNames)
+          lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libManifest.libOverlays coreNames)
         );
         rawExtraLibOverlayImports = given "extraLibOverlayImports" (_lib: [ ]);
         rawEcosystems = given "defaultEcosystemSrc" { };
@@ -1592,7 +1552,6 @@ let
           extraOverlayClosure = {
             closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
-            inherit contributeClasses contributeModules;
           };
         };
 
@@ -1654,7 +1613,7 @@ let
             builtins.throw ''
               mkLib expects `libOverlayImports` to be a function taking the core
               lib and returning the entries to compose
-              (`lib: [ lib.caisson-core.libOverlays.<name> ]`), but
+              (`lib: [ lib.caisson-core.libManifest.libOverlays.<name> ]`), but
               got a ${builtins.typeOf rawLibOverlayImports}.
             '';
         # `extraLibOverlayImports` adds to that selection, the default
@@ -1666,7 +1625,7 @@ let
             builtins.throw ''
               mkLib expects `extraLibOverlayImports` to be a function taking the
               core lib and returning the entries to compose beside the selection
-              (`lib: [ lib.caisson-core.libOverlays.<name> ]`), but
+              (`lib: [ lib.caisson-core.libManifest.libOverlays.<name> ]`), but
               got a ${builtins.typeOf rawExtraLibOverlayImports}.
             '';
         importedLibOverlays =
@@ -1689,22 +1648,6 @@ let
                 entries, but it returned a ${builtins.typeOf extraLibOverlayImports}.
               ''
           );
-
-        # Consumed projects' modules enter the registry like overlay
-        # contributions: available to every selection, beaten by a
-        # same-named local registration.
-        projectModulesOverlay = {
-          imports = [ ];
-          overlay = _final: prev: contributeModules prev projectModules;
-        };
-
-        # The composing flake's registrations apply last, so a
-        # local name deterministically beats a same-named
-        # overlay-borne contribution.
-        localModulesOverlay = {
-          imports = [ ];
-          overlay = _final: prev: contributeModules prev modules;
-        };
 
         # The manifest's module dictionary, like its overlay
         # dictionary, is the registered union: consumed projects'
@@ -1747,8 +1690,7 @@ let
         #     so its manifest lacks what they register, and `pkgOverlays`
         #     with them.
         #   - The registered lib: the same entries with those
-        #     registrations grafted on, and the modules they register
-        #     composed into the module registry view. It is the lib the
+        #     registrations grafted onto its manifest. It is the lib the
         #     `pkgSets` function receives: a package config is a module
         #     evaluation over the registered modules and package
         #     overlays, so it needs them, and its manifest lacks
@@ -1869,14 +1811,13 @@ let
         };
 
         # The constructors that make registry entries, as the core,
-        # bootstrap and registered libs hold them. A registration closes over its
-        # author's composition, the lib whose `caisson-core.modules` is
-        # the author's registry, and for the registrations made at those
-        # stages that is the full lib, not the lib the registry function
-        # receives. So `mkModule` there, and every class-bound `mkModule`
-        # made from it (the integrations' and the class index that
-        # `mkModules` reads), closes over the full lib, as the helpers
-        # handed to `libOverlays` and `pkgOverlays` do.
+        # bootstrap and registered libs hold them. A registration closes
+        # over the composition of its author, the lib whose manifest
+        # holds the registry of that author, and for the registrations
+        # made at those stages that is the full lib, not the lib the
+        # registry function receives. So `mkModule` there, and every
+        # class-bound `mkModule` made from it, closes over the full lib,
+        # as the helpers handed to `libOverlays` and `pkgOverlays` do.
         registrationConstructors = {
           mkModule = mkModuleForComposition {
             inherit sources finalLib;
@@ -1889,38 +1830,16 @@ let
 
         # A stage's manifest enters its lib through composition, as a
         # final overlay setting `libManifest`.
-        #
-        # A lib an evaluation runs on (`evalManifest` filled in) shows
-        # the module registry of that evaluation: the registry of the
-        # composition, with the entries the manifest holds on top.
         manifestOverlay = manifest: extra: {
           imports = [ ];
-          overlay =
-            _final: prev:
-            let
-              evalManifest = extra.evalManifest or null;
-              composed = (prev.caisson-core or { }).modules or { };
-            in
-            {
-              caisson-core =
-                (prev.caisson-core or { })
-                // extra
-                // {
-                  libManifest = manifest;
-                }
-                // (
-                  if evalManifest == null then
-                    { }
-                  else
-                    {
-                      modules =
-                        composed
-                        // builtins.mapAttrs (class: names: (composed.${class} or { }) // names) (
-                          evalManifest.modules or { }
-                        );
-                    }
-                );
-            };
+          overlay = _final: prev: {
+            caisson-core =
+              (prev.caisson-core or { })
+              // extra
+              // {
+                libManifest = manifest;
+              };
+          };
         };
 
         # The phase manifests a later phase fills in on a lib it hands
@@ -2021,25 +1940,17 @@ let
 
         registeredComposition = stage {
           composeArgs = { registry = registeredLibOverlays; };
-          overlays = importedLibOverlays ++ [
-            projectModulesOverlay
-            localModulesOverlay
-          ];
+          overlays = importedLibOverlays;
           manifest = registeredManifest;
-          extra = registrationConstructors // {
-            inherit configs;
-          };
+          extra = registrationConstructors;
         } { };
         registeredLib = registeredComposition.lib;
 
         composition = stage {
           composeArgs = { registry = registeredLibOverlays; };
-          overlays = importedLibOverlays ++ [
-            projectModulesOverlay
-            localModulesOverlay
-          ];
+          overlays = importedLibOverlays;
           manifest = fullManifest;
-          extra = { inherit configs; };
+          extra = { };
         } { };
         finalLib = composition.lib;
 
@@ -2242,8 +2153,6 @@ in
   overlay = final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
       inherit
-        contributeClasses
-        contributeModules
         coreEntries
         definers
         ecosystemSrc
@@ -2267,33 +2176,13 @@ in
       };
       mkLibOverlay = mkLibOverlayFor {
         sources = closure-inputs;
-        # Lazily bound, so overlay files that contribute no modules do
-        # not force the composed fixpoint through these.
+        # Lazily bound, so overlay files that do not use them do not
+        # force the composed fixpoint through these.
         extraOverlayClosure = {
           closure-lib = final;
           mkModule = final.caisson-core.mkModule;
-          inherit contributeClasses contributeModules;
         };
       };
-      # Seed only: overlay contributions merge in during composition,
-      # and mkLib applies the local registrations as a final overlay
-      # so the composing flake's entries win over contributed
-      # entries.
-      modules = (prev.caisson-core or { }).modules or { };
-      # The class index: per class, the integration that owns it and
-      # the mkModule the class registers through. Each integration
-      # declares the class it owns (contributeClasses); the class-free
-      # `generic` class, whose modules any class may import, is
-      # declared here, since no integration owns it.
-      classes = {
-        generic = {
-          integration = "caisson-core";
-          mkModule = final.caisson-core.mkModule "generic";
-        };
-      }
-      // ((prev.caisson-core or { }).classes or { });
-      # The configurations registry, filled by mkLib.
-      configs = (prev.caisson-core or { }).configs or { };
       # The phase manifests, one per evaluation phase: the lib (filled
       # in by mkLib), the package set (filled in on the lib inside a
       # package set) and the module evaluation (filled in on the lib an
@@ -2302,24 +2191,6 @@ in
       libManifest = (prev.caisson-core or { }).libManifest or null;
       pkgsManifest = (prev.caisson-core or { }).pkgsManifest or null;
       evalManifest = (prev.caisson-core or { }).evalManifest or null;
-      # The registries visible at this lib, by registry name, each
-      # under the name of the mkLib argument that fills it: views of
-      # `libOverlays` and `pkgOverlays` on the manifest. A selection
-      # refers into them (`libOverlayImports = lib: [
-      # lib.caisson-core.libOverlays.<name> ];`, and a package set
-      # selects from `lib.caisson-core.pkgOverlays`). Empty in a
-      # library no mkLib built, and `pkgOverlays` is empty until the
-      # stage that registers package overlays.
-      libOverlays =
-        let
-          manifest = final.caisson-core.libManifest;
-        in
-        if manifest == null then { } else manifest.libOverlays or { };
-      pkgOverlays =
-        let
-          manifest = final.caisson-core.libManifest;
-        in
-        if manifest == null then { } else manifest.pkgOverlays or { };
     };
   };
 }
