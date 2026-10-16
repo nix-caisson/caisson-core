@@ -526,6 +526,43 @@ let
 
     entryValidationThrows = throws (compose { entries = [ { key = "test.k"; } ]; }).meta.order;
 
+    # `appendKeyless` is the composition of the entries with the
+    # keyless entries given after them: the lib, the layers and the
+    # meta that composing both lists gives. An appended entry with a
+    # key, or with imports, is refused.
+    appendKeylessComposesAfterTheEntries =
+      let
+        keyed = entry "test.keyed" [ ] (_final: _prev: { fromKeyed = true; });
+        anon = {
+          key = null;
+          imports = [ ];
+          overlay = _final: prev: { count = (prev.count or 0) + 1; };
+        };
+        last = {
+          imports = [ ];
+          overlay = final: prev: {
+            sawAll = prev.fromKeyed && prev.count == 1;
+            sawFinal = final.count;
+          };
+        };
+        appended = (compose { entries = [ anon keyed ]; }).appendKeyless [ last ];
+        together = compose { entries = [ anon keyed last ]; };
+      in
+      appended.lib.sawAll
+      && appended.lib.sawFinal == 1
+      && appended.meta.order == together.meta.order
+      && appended.meta.tailLength == together.meta.tailLength
+      && builtins.length appended.layers == builtins.length together.layers
+      && throws ((compose { entries = [ anon ]; }).appendKeyless [ keyed ])
+      && throws (
+        (compose { entries = [ anon ]; }).appendKeyless [
+          {
+            imports = [ keyed ];
+            overlay = _final: _prev: { };
+          }
+        ]
+      );
+
     resolveExplicitWins =
       resolve {
         name = "probe-lib";

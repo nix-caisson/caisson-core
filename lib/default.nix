@@ -160,19 +160,44 @@ let
       inherit (folded) layers;
     };
 
+  # The composition of `entries`: the lib, its layers, and `meta`, the
+  # keyed order the walk found. `appendKeyless more` is the composition
+  # of `entries ++ more`, where every entry of `more` has no key and
+  # imports nothing. Such an entry joins the keyless tail and is applied
+  # after everything `entries` composes, in list order, so the walk of
+  # `entries` stands: only the overlays are applied again. A caller that
+  # composes the same entries with different keyless entries after them
+  # walks the entries once.
   compose =
     { entries }:
     let
       walked = walk entries;
       keyedEntries = builtins.map (k: walked.winners.${k}) walked.order;
-      applied = applyEntries (keyedEntries ++ walked.tail);
+      composition =
+        tail:
+        let
+          applied = applyEntries (keyedEntries ++ tail);
+        in
+        {
+          inherit (applied) lib layers;
+          meta = {
+            inherit (walked) winners order;
+            tailLength = builtins.length tail;
+          };
+        };
+      appendable =
+        raw:
+        let
+          e = validateEntry raw;
+        in
+        if (e.key or null) != null || (e.imports or [ ]) != [ ] then
+          builtins.throw "caisson-core: compose's appendKeyless takes entries with no key that import nothing"
+        else
+          e;
     in
-    {
-      inherit (applied) lib layers;
-      meta = {
-        inherit (walked) winners order;
-        tailLength = builtins.length walked.tail;
-      };
+    composition walked.tail
+    // {
+      appendKeyless = more: composition (walked.tail ++ builtins.map appendable more);
     };
 
   # The overlays caisson-core is made of, in composition order.

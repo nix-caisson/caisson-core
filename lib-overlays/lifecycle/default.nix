@@ -1892,63 +1892,66 @@ let
         # new fixpoint, so everything that reads a phase manifest
         # through the fixpoint sees it, and not an attribute merge over
         # a built lib.
+        #
+        # The manifest overlay has no key and imports nothing, so it is
+        # applied after everything the overlays compose, whatever they
+        # are. A stage therefore takes its overlays `composed`, resolved
+        # and walked, and each build applies them again with another
+        # manifest overlay after them. A module evaluation rebuilds the
+        # lib it runs on, so the walk would otherwise be repeated for
+        # every evaluation, and the stages that compose the same
+        # overlays share one walk.
         stage =
           {
-            composeArgs,
-            overlays,
+            composed,
             manifest,
             extra,
           }:
-          filled:
-          composeRegistered composeArgs (
-            overlays
-            ++ [
-              (manifestOverlay manifest (
-                extra
-                // filled
-                // {
-                  withManifests =
-                    more:
-                    (stage {
-                      inherit
-                        composeArgs
-                        overlays
-                        manifest
-                        extra
-                        ;
-                    } (filled // checkedManifests more)).lib;
-                }
-              ))
-            ]
-          );
+          let
+            build =
+              filled:
+              composed.appendKeyless [
+                (manifestOverlay manifest (
+                  extra
+                  // filled
+                  // {
+                    withManifests = more: (build (filled // checkedManifests more)).lib;
+                  }
+                ))
+              ];
+          in
+          build;
 
         coreComposition = stage {
-          composeArgs = { };
-          overlays = builtins.map (name: forcedLibOverlays.${name}) coreNames;
+          composed = composeRegistered { } (builtins.map (name: forcedLibOverlays.${name}) coreNames);
           manifest = coreManifest;
           extra = registrationConstructors;
         } { };
         coreLib = coreComposition.lib;
 
+        # The selection, resolved against the registry and walked: the
+        # bootstrap, registered and full stages each compose it with
+        # their own manifest after it.
+        selectionComposition = composeRegistered {
+          registry = registeredLibOverlays;
+        } importedLibOverlays;
+
         bootstrapComposition = stage {
-          composeArgs = { registry = registeredLibOverlays; };
-          overlays = importedLibOverlays;
+          composed = selectionComposition;
           manifest = bootstrapManifest;
           extra = registrationConstructors;
         } { };
         bootstrapLib = bootstrapComposition.lib;
 
         registeredComposition = stage {
-          composeArgs = { registry = registeredLibOverlays; };
-          overlays = importedLibOverlays;
+          composed = selectionComposition;
           manifest = registeredManifest;
           extra = registrationConstructors;
         } { };
         registeredLib = registeredComposition.lib;
 
         composition = stage {
-          composeArgs = { registry = registeredLibOverlays; };
-          overlays = importedLibOverlays;
+          composed = selectionComposition;
           manifest = fullManifest;
           extra = { };
         } { };
@@ -1963,7 +1966,7 @@ let
         # the selection alone: the registrations and the manifest
         # compose after it as caisson-core's recording, not as
         # entries.
-        selectionMeta = (composeRegistered { registry = registeredLibOverlays; } importedLibOverlays).meta;
+        selectionMeta = selectionComposition.meta;
         entries =
           builtins.map (key: {
             inherit key;
