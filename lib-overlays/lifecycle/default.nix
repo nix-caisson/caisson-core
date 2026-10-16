@@ -1893,14 +1893,17 @@ let
         # through the fixpoint sees it, and not an attribute merge over
         # a built lib.
         #
-        # The manifest overlay has no key and imports nothing, so it is
-        # applied after everything the overlays compose, whatever they
-        # are. A stage therefore takes its overlays `composed`, resolved
-        # and walked, and each build applies them again with another
-        # manifest overlay after them. A module evaluation rebuilds the
-        # lib it runs on, so the walk would otherwise be repeated for
-        # every evaluation, and the stages that compose the same
-        # overlays share one walk.
+        # `compose` applies the keyed entries first, in the order its walk
+        # finds, and then the keyless entries, in list order. The
+        # manifest overlay has no key and is the last entry of the list,
+        # so it is always the last overlay applied, and the walk of the
+        # other overlays is the same with any manifest overlay. A stage
+        # therefore takes its other overlays `composed`, walked once, and
+        # each build applies them again with its manifest overlay last,
+        # through `appendKeyless`. A module evaluation rebuilds the lib it
+        # runs on, so without this the walk would be repeated for every
+        # evaluation. The stages that compose the same overlays share one
+        # walk.
         stage =
           {
             composed,
