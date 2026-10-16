@@ -1932,9 +1932,15 @@ let
         } { };
         coreLib = coreComposition.lib;
 
-        # The selection, resolved against the registry and walked: the
-        # bootstrap, registered and full stages each compose it with
-        # their own manifest after it.
+        # The lib overlays this mkLib call composes, put in the order
+        # `compose` applies them: caisson-core's entries, then the ones
+        # `libOverlayImports` and `extraLibOverlayImports` pick, each
+        # import looked up by name in the registered lib overlays. mkLib
+        # builds three libraries from these same overlays: the one the
+        # `modules`, `configs` and `pkgOverlays` functions receive, the
+        # one `pkgSets` receives, and the finished lib. The three differ
+        # only in the manifest overlay applied last, so they share this
+        # ordering, computed once.
         selectionComposition = composeRegistered {
           registry = registeredLibOverlays;
         } importedLibOverlays;
