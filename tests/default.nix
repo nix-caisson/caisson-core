@@ -69,6 +69,7 @@ let
       ) (config.children or { });
       forChildren = config.forChildren or { };
       events = config.events or [ ];
+      record = config.record or { };
     };
 
   # The registry names of caisson-core's entries, present in every
@@ -2074,6 +2075,30 @@ let
       && builtins.attrNames single == [ "x86_64-linux" ]
       && single.x86_64-linux.outputs.marker == "at x86_64-linux";
 
+    # An evaluation records the fields its integration names in
+    # `recordFromEvaluation` from the `record` its evaluation returns,
+    # in the childless view and in the full view, each from what that
+    # view's evaluation returned. The integration may not name a field
+    # mkConfiguration writes.
+    lifecycleAnEvaluationRecordsTheFieldsItsIntegrationNames =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        recording =
+          fields: module:
+          composed.caisson-core.finalizeTop (
+            stubIntegrationWith { recordFromEvaluation = fields; } "recording" composed module
+          );
+        top = recording [ "selection" ] (lib: {
+          record.selection = if lib.caisson-core.evalManifest.childless then "childless" else "full";
+        });
+      in
+      top.selection == "full"
+      && top.childlessManifest.selection == "childless"
+      && throws (recording [ "history" ] (_lib: { })).name;
+
     # Every configuration has a history. The history of its childless
     # manifest begins with the history of its parent and continues with
     # the events its evaluation records, each naming the manifest by
@@ -2468,7 +2493,9 @@ let
     # that class for the configurations beneath it, at any depth and
     # through a system. It reaches nothing at the evaluation itself or
     # beside it. What a level beneath adds comes after what the levels
-    # above added. The module registry is the same at every level.
+    # above added. Each entry carries the file the level gave and the
+    # name path of the level. The module registry is the same at every
+    # level.
     lifecycleDefaultAdditionsReachWhatIsBeneath =
       let
         composed = core.mkLib {
@@ -2479,14 +2506,21 @@ let
         registry = manifest: manifest.value.seenLib.caisson-core.libManifest.modules.stub or { };
         selected =
           manifest:
-          builtins.concatMap (selection: selection manifest.value.seenLib) (
+          builtins.concatMap (entry: entry.select manifest.value.seenLib) (
             manifest.defaultModuleImports.stub or [ ]
           );
+        entriesOf =
+          manifest:
+          builtins.map (entry: { inherit (entry) file level; }) (manifest.defaultModuleImports.stub or [ ]);
+        addition = file: value: {
+          select = _lib: [ value ];
+          inherit file;
+        };
         top = composed.caisson-core.finalizeTop (
           stubIntegration "holder" composed (lib: {
-            forChildren.extraDefaultModuleImports.stub = [ (_lib: [ "from the holder" ]) ];
+            forChildren.extraDefaultModuleImports.stub = [ (addition "holder.nix" "from the holder") ];
             children.stub.inner = stubIntegration "stub" lib (lib: {
-              forChildren.extraDefaultModuleImports.stub = [ (_lib: [ "from inner" ]) ];
+              forChildren.extraDefaultModuleImports.stub = [ (addition "inner.nix" "from inner") ];
               children.stub.deep = stubIntegration "stub" lib (_lib: { });
             });
             children.machine.host = perSystemStubIntegration "machine" lib (_lib: { });
@@ -2504,6 +2538,21 @@ let
       && selected deep == [
         "from the holder"
         "from inner"
+      ]
+      && entriesOf deep == [
+        {
+          file = "holder.nix";
+          level = [ ];
+        }
+        {
+          file = "inner.nix";
+          level = [
+            {
+              type = "stub";
+              name = "inner";
+            }
+          ];
+        }
       ]
       && registry top == { }
       && registry inner == { }
