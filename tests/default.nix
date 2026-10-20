@@ -68,6 +68,7 @@ let
         )
       ) (config.children or { });
       forChildren = config.forChildren or { };
+      events = config.events or [ ];
     };
 
   # The registry names of caisson-core's entries, present in every
@@ -2072,6 +2073,118 @@ let
       && x86.childlessManifest.system == "x86_64-linux"
       && builtins.attrNames single == [ "x86_64-linux" ]
       && single.x86_64-linux.outputs.marker == "at x86_64-linux";
+
+    # Every configuration has a history. The history of its childless
+    # manifest begins with the history of its parent and continues with
+    # the events its evaluation records, each naming the manifest by
+    # its name path, its type and its index within its operation. The
+    # history of the full manifest is the history of the childless
+    # manifest, then what each configuration beneath adds after the
+    # history it began with. A top has the empty name path, and the
+    # system above a configuration evaluated per system is a segment of
+    # the path.
+    lifecycleEveryConfigurationHasAHistory =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        declaration = key: {
+          operation = "declaration";
+          inherit key;
+          origin = {
+            project = "probe-project";
+            file = "${key}.nix";
+          };
+        };
+        top = composed.caisson-core.finalizeTop (
+          stubIntegration "structural" composed (lib: {
+            events = [ (declaration "top") ];
+            children.machine.laptop = perSystemStubIntegration "machine" lib (lib: {
+              events = [
+                (declaration "laptop-a")
+                (declaration "laptop-b")
+              ];
+              children.home.chris = stubIntegration "home" lib (_lib: {
+                events = [ (declaration "chris") ];
+              });
+            });
+          })
+        );
+        laptop = top.children.system.x86_64-linux.children.machine.laptop;
+        chris = laptop.children.home.chris;
+        identity = event: {
+          inherit (event)
+            manifest
+            type
+            operation
+            index
+            key
+            ;
+        };
+        identities = builtins.map identity;
+        libHistory = identities composed.caisson-core.libManifest.history;
+        laptopPath = [
+          {
+            type = "system";
+            name = "x86_64-linux";
+          }
+          {
+            type = "machine";
+            name = "laptop";
+          }
+        ];
+        chrisPath = laptopPath ++ [
+          {
+            type = "home";
+            name = "chris";
+          }
+        ];
+        topEvents = [
+          {
+            manifest = [ ];
+            type = "structural";
+            operation = "declaration";
+            index = 0;
+            key = "top";
+          }
+        ];
+        laptopEvents = [
+          {
+            manifest = laptopPath;
+            type = "machine";
+            operation = "declaration";
+            index = 0;
+            key = "laptop-a";
+          }
+          {
+            manifest = laptopPath;
+            type = "machine";
+            operation = "declaration";
+            index = 1;
+            key = "laptop-b";
+          }
+        ];
+        chrisEvents = [
+          {
+            manifest = chrisPath;
+            type = "home";
+            operation = "declaration";
+            index = 0;
+            key = "chris";
+          }
+        ];
+      in
+      identities top.childlessManifest.history == libHistory ++ topEvents
+      && identities laptop.childlessManifest.history == libHistory ++ topEvents ++ laptopEvents
+      && identities chris.history == libHistory ++ topEvents ++ laptopEvents ++ chrisEvents
+      && identities laptop.history == libHistory ++ topEvents ++ laptopEvents ++ chrisEvents
+      && identities top.history == libHistory ++ topEvents ++ laptopEvents ++ chrisEvents
+      && (builtins.elemAt chris.history (builtins.length chris.history - 1)).origin == {
+        project = "probe-project";
+        file = "chris.nix";
+      };
 
     # Where a configuration that is evaluated per system is declared
     # inside another, it is evaluated for the system of its parent by
