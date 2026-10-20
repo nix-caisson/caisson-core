@@ -552,7 +552,96 @@ let
         (parent.nearest or { })
         // (if (parent.type or "lib") == "lib" then { } else { ${parent.type} = parent; });
       inputs = builtins.concatMap builtins.attrValues (builtins.attrValues children);
+      history = historyWithChildren (parent.history or [ ]) children;
     };
+
+  # The name path of a manifest: the `{ type, name }` of every manifest
+  # beneath the top down to it, which is its address under `children`
+  # of the top's manifest. The top is the first manifest of the chain
+  # that is a configuration, neither a lib nor a system: a top
+  # evaluated per system sits beneath its system. The top, and what is
+  # above it, have the empty path.
+  namePathOf =
+    manifest:
+    let
+      chain = (manifest.ancestors or [ ]) ++ [ manifest ];
+      isTop = member: !(builtins.elem (member.type or "lib") [ "lib" "system" ]);
+      beneathTop =
+        builtins.foldl'
+          (
+            acc: member:
+            if acc.found then
+              acc
+              // {
+                segments = acc.segments ++ [
+                  {
+                    inherit (member) type name;
+                  }
+                ];
+              }
+            else
+              acc // { found = isTop member; }
+          )
+          {
+            found = false;
+            segments = [ ];
+          }
+          chain;
+    in
+    beneathTop.segments;
+
+  # The events an evaluation records itself, as its integration's
+  # `evaluate` returns them, made events of `manifest`: each names the
+  # manifest by its name path, its type, and its index among the
+  # events of its operation.
+  ownEventsOf =
+    manifest: events:
+    let
+      indexed = builtins.foldl' (
+        acc: event:
+        let
+          index = acc.counts.${event.operation} or 0;
+        in
+        {
+          counts = acc.counts // {
+            ${event.operation} = index + 1;
+          };
+          events = acc.events ++ [
+            (
+              event
+              // {
+                manifest = namePathOf manifest;
+                inherit (manifest) type;
+                inherit index;
+              }
+            )
+          ];
+        }
+      ) {
+        counts = { };
+        events = [ ];
+      } events;
+    in
+    indexed.events;
+
+  # The history of a manifest whose own history up to its children is
+  # `prefix`, with what each child beneath it adds: a child's history
+  # begins with the history of its parent, `prefix` itself, so each
+  # child adds what follows that.
+  historyWithChildren =
+    prefix: children:
+    let
+      length = builtins.length prefix;
+      beneath = builtins.concatMap builtins.attrValues (builtins.attrValues children);
+    in
+    prefix
+    ++ builtins.concatMap (
+      child:
+      let
+        history = child.history or [ ];
+      in
+      builtins.genList (i: builtins.elemAt history (length + i)) (builtins.length history - length)
+    ) beneath;
 
   # The record fields a module evaluation reads from its parent: the
   # declared facts and the registries, which are views over the chain.
@@ -650,6 +739,7 @@ let
     "children"
     "defaultModuleImports"
     "forChildren"
+    "history"
     "inputs"
     "name"
     "nearest"
@@ -683,6 +773,15 @@ let
   # `systems`, the list of systems in force beneath, null when the
   # evaluation states none. They are read from the childless view.
   # The configurations beneath inherit them, nested ones included.
+  #
+  # `evaluate` may also return `events`, the events the evaluation
+  # records, in the order they happened: each with its `operation`
+  # (`declaration` for what is handed to the evaluator), its `key` and
+  # its `origin`, `{ project, file }`. They are read from the
+  # childless view. The manifest's `history` is the history of its
+  # parent, then these events, each with the manifest's name path,
+  # its type and its index within its operation, then, on the full
+  # manifest, what the configurations beneath add to that.
   # Each may replace the package set and the systems for itself and
   # what is beneath it, and each may add to the default selections.
   # The evaluation that gives them does not inherit them. The
@@ -853,6 +952,16 @@ let
                       else
                         [ childlessManifest ] ++ builtins.concatMap builtins.attrValues (builtins.attrValues children)
                     );
+                  # The history of the childless view is the history of
+                  # its parent, then the events its evaluation records.
+                  # The history of the full view is the history of the
+                  # childless view, then what the configurations beneath
+                  # add.
+                  history =
+                    if childless then
+                      (base.parent.history or [ ]) ++ ownEventsOf manifest (evaluated.events or [ ])
+                    else
+                      historyWithChildren childlessManifest.history children;
                 }
                 // (if childless then { } else { inherit childlessManifest; });
             in
