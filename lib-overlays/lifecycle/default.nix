@@ -676,11 +676,17 @@ let
   # extends them in turn, so what a level gives is inherited by the
   # configurations beneath it, nested ones included, until a level
   # between replaces it.
+  #
+  # Each default selection is a record, `{ select; file; level; }`:
+  # `select` the selection, `file` the file that gave it, as the
+  # integration of `parent` records it, and `level` the name path of
+  # `parent`, which caisson-core adds here.
   inheritedFrom =
     parent:
     let
       given = parent.forChildren or { };
       defaultsAbove = parent.defaultModuleImports or { };
+      level = namePathOf parent;
     in
     builtins.intersectAttrs inheritedFields parent
     // (
@@ -688,9 +694,10 @@ let
         {
           defaultModuleImports =
             defaultsAbove
-            // builtins.mapAttrs (class: selections: (defaultsAbove.${class} or [ ]) ++ selections) (
-              given.extraDefaultModuleImports or { }
-            );
+            // builtins.mapAttrs (
+              class: selections:
+              (defaultsAbove.${class} or [ ]) ++ builtins.map (entry: entry // { inherit level; }) selections
+            ) (given.extraDefaultModuleImports or { });
           # Always present beneath such a parent, null where nothing
           # selects: listing the fields of a manifest then evaluates
           # no parent.
@@ -766,13 +773,20 @@ let
   #
   # `evaluate` may also return `forChildren`, what the evaluation
   # gives the configurations beneath it: `extraDefaultModuleImports`,
-  # by class a list of selections (functions of a lib returning
-  # registered modules), which are added to the default selection of
-  # that class beneath; `defaultPkgs`, a selection of the package set
-  # in force beneath, null when the evaluation makes none; and
-  # `systems`, the list of systems in force beneath, null when the
+  # by class a list of default selections, each `{ select; file; }`,
+  # `select` a function of a lib returning registered modules and
+  # `file` the file that gave it, which are added to the default
+  # selection of that class beneath; `defaultPkgs`, a selection of the
+  # package set in force beneath, null when the evaluation makes none;
+  # and `systems`, the list of systems in force beneath, null when the
   # evaluation states none. They are read from the childless view.
   # The configurations beneath inherit them, nested ones included.
+  # Each may replace the package set and the systems for itself and
+  # what is beneath it, and each may add to the default selections.
+  # The evaluation that gives them does not inherit them. The
+  # manifest of an evaluation holds the default selections in force
+  # at it as `defaultModuleImports`, each with the name path of the
+  # level that gave it as `level`.
   #
   # `evaluate` may also return `events`, the events the evaluation
   # records, in the order they happened: each with its `operation`
@@ -782,11 +796,15 @@ let
   # parent, then these events, each with the manifest's name path,
   # its type and its index within its operation, then, on the full
   # manifest, what the configurations beneath add to that.
-  # Each may replace the package set and the systems for itself and
-  # what is beneath it, and each may add to the default selections.
-  # The evaluation that gives them does not inherit them. The
-  # manifest of an evaluation holds the default selections in force
-  # at it as `defaultModuleImports`.
+  #
+  # `evaluate` may also return `record`, plain data the evaluation adds
+  # to its manifest, such as the account of how it selected its
+  # modules. `recordFromEvaluation` lists the names of those fields,
+  # since the names of the fields of a manifest are known before
+  # anything evaluates: the evaluation reads its manifest. Each view
+  # records what its evaluation returns under those names. As for the
+  # `record` of the integration, they may not name a field
+  # mkConfiguration writes.
   #
   # The evaluation has a childless view and a full view. Each is a
   # manifest, and each runs on the lib of the declaration rebuilt
@@ -828,18 +846,22 @@ let
       type,
       evaluate,
       record ? { },
+      recordFromEvaluation ? [ ],
       perSystem ? false,
     }:
     { name, parent }:
     let
-      owned = builtins.filter (field: record ? ${field}) configurationFields;
+      owned = builtins.filter (
+        field: record ? ${field} || builtins.elem field recordFromEvaluation
+      ) configurationFields;
       checkedRecord =
         if owned == [ ] then
           record
         else
           builtins.throw ''
-            caisson-core.mkConfiguration: the `${type}` integration's `record` names
-            `${builtins.head owned}`, a field mkConfiguration writes.
+            caisson-core.mkConfiguration: the `${type}` integration's `record` or
+            `recordFromEvaluation` names `${builtins.head owned}`, a field
+            mkConfiguration writes.
           '';
       libManifest = final.caisson-core.libManifest;
 
@@ -944,6 +966,14 @@ let
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
                     systems = (evaluated.forChildren or { }).systems or null;
                   };
+                }
+                // builtins.listToAttrs (
+                  builtins.map (field: {
+                    name = field;
+                    value = evaluated.record.${field} or null;
+                  }) recordFromEvaluation
+                )
+                // {
                   inputs =
                     [ libManifest ]
                     ++ (
