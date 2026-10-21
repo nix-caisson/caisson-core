@@ -1297,8 +1297,9 @@ let
       name ? null,
       # The platforms the tree builds on.
       systems ? null,
-      # The tree's default source per ecosystem, by exact name (the
-      # argument once called `ecosystems`).
+      # The tree's default source per ecosystem, by exact name: a
+      # function of `sources` returning the source of each ecosystem,
+      # `sources: { nixpkgs-lib = sources.nixpkgs; }`.
       defaultEcosystemSrc ? null,
       # Consumed projects' contributions, by project name.
       projects ? null,
@@ -1422,7 +1423,7 @@ let
           lib: builtins.attrValues (builtins.removeAttrs lib.caisson-core.libManifest.libOverlays coreNames)
         );
         rawExtraLibOverlayImports = given "extraLibOverlayImports" (_lib: [ ]);
-        rawEcosystems = given "defaultEcosystemSrc" { };
+        rawEcosystems = given "defaultEcosystemSrc" (_sources: { });
         rawProjects = given "projects" { };
         rawSystems = resolvedArgs.systems or null;
         rawName = resolvedArgs.name or null;
@@ -1602,16 +1603,29 @@ let
         # Declared ecosystem sources: mkLib-time facts, captured in the
         # manifest for the layered resolution higher layers perform
         # (explicit argument, then these declarations, then the pinned
-        # source with exactly the declared name). Nothing here
-        # interprets them.
+        # source with exactly the declared name). The declaration is a
+        # selection from the tree's pinned sources, so every source a
+        # tree uses is one it pins; the manifest holds what it
+        # selected, by ecosystem. Nothing here interprets them.
         defaultEcosystemSrc =
-          if builtins.isAttrs rawEcosystems then
-            rawEcosystems
+          if builtins.isFunction rawEcosystems then
+            let
+              selected = rawEcosystems sources;
+            in
+            if builtins.isAttrs selected then
+              selected
+            else
+              builtins.throw ''
+                mkLib expects `defaultEcosystemSrc` to return an attribute set of
+                ecosystem sources keyed by their exact names, but it returned a
+                ${builtins.typeOf selected}.
+              ''
           else
             builtins.throw ''
-              mkLib expects `defaultEcosystemSrc` to be an attribute set of ecosystem
-              sources keyed by their exact names (`{ <ecosystem> = <source>; }`),
-              but got a ${builtins.typeOf rawEcosystems}.
+              mkLib expects `defaultEcosystemSrc` to be a function of `sources`
+              returning the source of each ecosystem by its exact name,
+              `sources: { nixpkgs-lib = sources.nixpkgs; }`, but got a
+              ${builtins.typeOf rawEcosystems}.
             '';
 
         # `modules` and `configs` are functions of the bootstrap lib: the
@@ -2292,7 +2306,7 @@ let
         (builtins.isFunction rawExtraLibOverlayImports || extraLibOverlayImports)
         (builtins.isFunction rawPkgOverlays || localPkgOverlays)
         (builtins.isFunction rawPkgSets || pkgSets)
-        (builtins.isAttrs rawEcosystems || defaultEcosystemSrc)
+        (builtins.isFunction rawEcosystems || defaultEcosystemSrc)
         (builtins.isAttrs rawProjects || projects)
         (rawSystems == null || builtins.isList rawSystems || systems)
         (rawName == null || builtins.isString rawName || name)
