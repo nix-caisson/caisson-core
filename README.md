@@ -105,9 +105,10 @@ core.mkLib {
   # the root). Only `sources` is required.
   sources = { };
   root = null;
-  defaultEcosystemSrc = { some-ecosystem = inputs.some-ecosystem; };
+  defaultEcosystemSrc = sources: { some-ecosystem = sources.some-pin; };
                           # the tree's default source per ecosystem, by
-                          # exact name; read back with `ecosystemSrc`
+                          # exact name, selected from `sources`; read back
+                          # with `ecosystemSrc`
   modules = lib: { };                 # class-keyed local registrations,
                                       # given the bootstrap lib
   configs = lib: { };                 # class-keyed configurations
@@ -325,8 +326,9 @@ The registries are in the manifest and nowhere else in the library:
 and a package set selects from `libManifest.pkgOverlays`.
 
 `ecosystemSrc <name>` is the source the composition supplies for an
-ecosystem, by exact name: the `defaultEcosystemSrc.<name>` it
-declares, else the source it pins under that name, else null. It is
+ecosystem, by exact name: the source its `defaultEcosystemSrc`
+selects for that name, else the source it pins under that name, else
+null. It is
 fixed by the arguments of the `mkLib` call, so an overlay composed
 after caisson-core's entries may read it from `prev` to decide what
 it adds. An entry that a project contributes then gets the source of

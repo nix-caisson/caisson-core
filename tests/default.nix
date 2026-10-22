@@ -833,8 +833,8 @@ let
     lifecycleSourceLibraryEntryComposesFromTheDeclaredSource =
       let
         composed = core.mkLib {
-          sources = { };
-          defaultEcosystemSrc.probe-lib = ./fixtures/lib-stub;
+          sources.lib-stub = ./fixtures/lib-stub;
+          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
           libOverlays = lib: {
             probe = lib.caisson-core.mkLibOverlay (
               { mkLibOverlay, ... }:
@@ -856,9 +856,9 @@ let
     lifecycleSourceLibraryEntryRecordsItsFile =
       let
         composed = core.mkLib {
-          sources = { };
+          sources.lib-stub = ./fixtures/lib-stub;
           name = "probe-project";
-          defaultEcosystemSrc.probe-lib = ./fixtures/lib-stub;
+          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
           libOverlays = lib: {
             lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
           };
@@ -914,13 +914,13 @@ let
             }
           );
         otherTree = core.mkLib {
-          sources = { };
-          defaultEcosystemSrc.probe-lib = ./fixtures/lib-stub;
+          sources.lib-stub = ./fixtures/lib-stub;
+          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
           libOverlays = lib: { exported = exported lib; };
         };
         here = core.mkLib {
-          sources = { };
-          defaultEcosystemSrc.probe-lib = ./fixtures/other-lib-stub;
+          sources.other-lib-stub = ./fixtures/other-lib-stub;
+          defaultEcosystemSrc = sources: { probe-lib = sources.other-lib-stub; };
           projects.other.libOverlays = {
             inherit (otherTree.caisson-core.libManifest.libOverlays) exported;
           };
@@ -984,14 +984,15 @@ let
             };
         };
         project = core.mkLib {
-          sources = { };
-          defaultEcosystemSrc.probe = "project";
+          sources.project-probe = "project";
+          defaultEcosystemSrc = sources: { probe = sources.project-probe; };
           libOverlays = _lib: { inherit reader; };
         };
         consumer = core.mkLib {
           sources.pinned = "consumer-pin";
           sources.probe = "shadowed";
-          defaultEcosystemSrc.probe = "consumer";
+          sources.consumer-probe = "consumer";
+          defaultEcosystemSrc = sources: { probe = sources.consumer-probe; };
           projects.dep.libOverlays = {
             inherit (project.caisson-core.libManifest.libOverlays) reader;
           };
@@ -3049,30 +3050,47 @@ let
         }
       );
 
+    # `defaultEcosystemSrc` is a selection from the tree's sources: the
+    # manifest holds what it selected, by ecosystem.
     lifecycleEcosystemDeclarationsJoinTheManifest =
       let
         composed = core.mkLib {
-          sources = { };
-          defaultEcosystemSrc = {
-            probe = "/probe-source";
-          };
+          sources.pinned = "/probe-source";
+          defaultEcosystemSrc = sources: { probe = sources.pinned; };
         };
       in
       composed.caisson-core.libManifest.defaultEcosystemSrc.probe == "/probe-source";
 
-    lifecycleDefaultEcosystemSrcMustBeAnAttrset = throws (
-      core.mkLib {
-        sources = { };
-        defaultEcosystemSrc = 42;
-      }
-    );
+    # `defaultEcosystemSrc` is refused unless it is a function returning
+    # an attribute set, an attribute set itself included.
+    lifecycleDefaultEcosystemSrcMustBeASelection =
+      throws (
+        core.mkLib {
+          sources = { };
+          defaultEcosystemSrc = 42;
+        }
+      )
+      && throws (
+        core.mkLib {
+          sources.pinned = "/probe-source";
+          defaultEcosystemSrc = {
+            probe = "/probe-source";
+          };
+        }
+      )
+      && throws (
+        core.mkLib {
+          sources = { };
+          defaultEcosystemSrc = _sources: 42;
+        }
+      );
 
     lifecycleInjectedMkLibIsTheSameMkLib =
       let
         outer = core.mkLib { sources = { }; };
         inner = outer.caisson-core.mkLib {
-          sources = { };
-          defaultEcosystemSrc.probe-lib = ./fixtures/lib-stub;
+          sources.lib-stub = ./fixtures/lib-stub;
+          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
           libOverlays = lib: {
             lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
           };
