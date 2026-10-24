@@ -322,7 +322,7 @@ Under `caisson-core`:
 | Entry constructors | `mkLibOverlay`, `mkPkgOverlay`, `mkModule` (class-parameterized) |
 | Directory readers | `mkModules`, `mkLibOverlays`, `mkPkgOverlays` |
 | Package overlays | `pkgOverlaysFor` |
-| Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `definers` |
+| Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `namePathOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
 | Sources | `ecosystemSrc` |
 | Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
@@ -698,6 +698,15 @@ finds it in whatever a file returns:
   manifests, where the last manifest filled in is the manifest.
 
 It returns null when the value carries none.
+
+### The address of a manifest: `namePathOf`
+
+`namePathOf` gives the name path of a manifest: the `{ type; name; }`
+of every manifest beneath the top down to it, which is its address
+under `children` of the top's manifest. The top is the first manifest
+of the chain that is a configuration, neither a lib nor a system, and
+the top and what is above it have the empty path. The events of
+`history` name their manifest by this path.
 
 Higher layers project the `libOverlays` and `modules` outputs of a
 flake from the manifest, and the `projects` argument consumes those

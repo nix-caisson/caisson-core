@@ -3129,6 +3129,50 @@ let
         selection = sources: { outPath = "${sources.first}/lib"; };
       } == null;
 
+    # `namePathOf` gives the `{ type, name }` of each manifest beneath
+    # the top down to the one asked about. A lib, a system and the top
+    # contribute no segment.
+    lifecycleNamePathOfIsTheAddressBeneathTheTop =
+      let
+        lib = {
+          type = "lib";
+        };
+        top = {
+          type = "structural";
+          name = "top";
+          ancestors = [ lib ];
+        };
+        system = {
+          type = "system";
+          name = "x86_64-linux";
+          ancestors = [
+            lib
+            top
+          ];
+        };
+        machine = {
+          type = "nixos";
+          name = "laptop";
+          ancestors = [
+            lib
+            top
+            system
+          ];
+        };
+      in
+      core.namePathOf lib == [ ]
+      && core.namePathOf top == [ ]
+      && core.namePathOf machine == [
+        {
+          type = "system";
+          name = "x86_64-linux";
+        }
+        {
+          type = "nixos";
+          name = "laptop";
+        }
+      ];
+
     lifecycleInjectedMkLibIsTheSameMkLib =
       let
         outer = core.mkLib { sources = { }; };
