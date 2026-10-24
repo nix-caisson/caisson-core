@@ -1628,6 +1628,18 @@ let
               ${builtins.typeOf rawEcosystems}.
             '';
 
+        # The name of the pinned source `defaultEcosystemSrc` selects
+        # for each ecosystem, or null where it returns a value it built
+        # in another way. Each name is read from the selection applied
+        # to the sources tagged with their names (source-names.nix), so
+        # recording the names forces no source the selection does not
+        # read.
+        defaultEcosystemSrcNames =
+          let
+            names = builtins.import ../resolve/source-names.nix;
+          in
+          builtins.mapAttrs (_: names.nameOf) (rawEcosystems (names.tagged sources));
+
         # `modules` and `configs` are functions of the bootstrap lib: the
         # selected entries are in it, the module registrations are not.
         modules =
@@ -1875,6 +1887,7 @@ let
           type = "lib";
           inherit
             defaultEcosystemSrc
+            defaultEcosystemSrcNames
             projects
             root
             systems
