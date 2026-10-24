@@ -2340,6 +2340,7 @@ in
         manifestOf
         mkExtendedLib
         mkLib
+        namePathOf
         pkgOverlaysFor
         ;
       mkConfiguration = mkConfigurationFor final;
