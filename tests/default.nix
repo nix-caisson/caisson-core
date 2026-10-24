@@ -1380,6 +1380,7 @@ let
         "children"
         "configs"
         "defaultEcosystemSrc"
+        "defaultEcosystemSrcNames"
         "entries"
         "history"
         "inputs"
@@ -3084,6 +3085,49 @@ let
           defaultEcosystemSrc = _sources: 42;
         }
       );
+
+    # The lib manifest names the pinned source `defaultEcosystemSrc`
+    # selects for each ecosystem, null where the selection builds the
+    # value, and reading the names forces no source the selection does
+    # not read.
+    lifecycleDefaultEcosystemSrcNamesNameTheSelection =
+      let
+        manifest =
+          (core.mkLib {
+            sources = {
+              first.outPath = "/probe-first";
+              second.outPath = "/probe-second";
+              unread = builtins.throw "the unread source was forced";
+            };
+            defaultEcosystemSrc = sources: {
+              picked = sources.first;
+              built.outPath = "${sources.second}/lib";
+            };
+          }).caisson-core.libManifest;
+      in
+      manifest.defaultEcosystemSrcNames == {
+        picked = "first";
+        built = null;
+      }
+      && manifest.defaultEcosystemSrc.picked.outPath == "/probe-first";
+
+    # `selectedSourceName` names the source a selection returns, or
+    # null for a value the selection builds.
+    resolveSelectedSourceName =
+      let
+        sources = {
+          first.outPath = "/probe-first";
+          unread = builtins.throw "the unread source was forced";
+        };
+      in
+      core.selectedSourceName {
+        inherit sources;
+        selection = sources: sources.first;
+      } == "first"
+      && core.selectedSourceName {
+        inherit sources;
+        selection = sources: { outPath = "${sources.first}/lib"; };
+      } == null;
 
     lifecycleInjectedMkLibIsTheSameMkLib =
       let

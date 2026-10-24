@@ -92,6 +92,22 @@ source with exactly the declared name. A full miss returns `null`; `resolve`
 can never throw or format an error message, because interpreting a
 miss is deliberately the calling layer's job.
 
+`selectedSourceName` names the pinned source a selection returns:
+
+```nix
+core.selectedSourceName {
+  selection = sources: sources.some-pin;   # a function of the sources
+  sources = { some-pin = …; };
+}
+# => "some-pin"
+```
+
+It applies the selection to a copy of `sources` in which each source
+carries its name, and reads the name from the result. A selection that
+builds its value in another way, such as a directory inside a source,
+gives `null`. The copy forces a source only where the selection reads
+it.
+
 ## The library lifecycle
 
 `mkLib` builds a composed library from registered overlays and
@@ -425,6 +441,7 @@ The manifest is the self-description of the composition, recorded at
 | `sources` | the pinned sources. The pin files a directory reader read are stated relative to the root when the directory lies in the tree of the root, and `pin.dir` is kept otherwise |
 | `root` | the tree being built; null for a composition that is not a top |
 | `defaultEcosystemSrc`, `systems` | as declared on `mkLib` |
+| `defaultEcosystemSrcNames` | for each ecosystem `defaultEcosystemSrc` returns a source for, the name of that source in `sources`, or `null` when the selection builds the value in another way (`selectedSourceName`) |
 | `projects` | the `projects` argument as given |
 | `libOverlays`, `modules`, `pkgOverlays` | the registered dictionaries, with project entries prefixed and local entries winning |
 | `moduleProjects` | where each module came from |
