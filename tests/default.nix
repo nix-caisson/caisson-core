@@ -68,6 +68,7 @@ let
         )
       ) (config.children or { });
       forChildren = config.forChildren or { };
+      forNearestChildren = config.forNearestChildren or { };
       events = config.events or [ ];
       record = config.record or { };
     };
@@ -2559,6 +2560,106 @@ let
       && registry top == { }
       && registry inner == { }
       && registry deep == { };
+
+    # What an evaluation adds for the nearest children of a class
+    # (`forNearestChildren.extraDefaultModuleImports`) passes through
+    # configurations of other classes and through a system, and it is
+    # in the default of the nearest configurations of that class beneath
+    # the evaluation, after the additions for all children. The
+    # configurations beneath those do not inherit it. The additions
+    # that reach a configuration are in tree order. A configuration of
+    # the class gives its own additions to the nearest configurations of
+    # the class beneath it. Each entry carries its file, its level and
+    # `nearest = true`.
+    lifecycleNearestAdditionsConnectOnce =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        classed = class: stubIntegrationWith { inherit class; };
+        perSystemClassed =
+          class:
+          stubIntegrationWith {
+            inherit class;
+            perSystem = true;
+          };
+        selected =
+          manifest:
+          builtins.concatMap (entry: entry.select manifest.value.seenLib) (
+            manifest.defaultModuleImports.stub or [ ]
+          );
+        entriesOf =
+          manifest:
+          builtins.map (entry: {
+            inherit (entry) file level;
+            nearest = entry.nearest or false;
+          }) (manifest.defaultModuleImports.stub or [ ]);
+        addition = file: value: {
+          select = _lib: [ value ];
+          inherit file;
+        };
+        top = composed.caisson-core.finalizeTop (
+          classed "holder" "holder" composed (lib: {
+            forChildren.extraDefaultModuleImports.stub = [ (addition "all.nix" "for all") ];
+            forNearestChildren.extraDefaultModuleImports.stub = [ (addition "holder.nix" "from the holder") ];
+            children.group.layout = classed "group" "group" lib (lib: {
+              forNearestChildren.extraDefaultModuleImports.stub = [ (addition "group.nix" "from the group") ];
+              children.stub.near = classed "stub" "stub" lib (lib: {
+                forNearestChildren.extraDefaultModuleImports.stub = [ (addition "near.nix" "from near") ];
+                children.stub.nested = classed "stub" "stub" lib (lib: {
+                  children.stub.nestedDeeper = classed "stub" "stub" lib (_lib: { });
+                });
+              });
+            });
+            children.machine.host = perSystemClassed "stub" "machine" lib (_lib: { });
+          })
+        );
+        near = top.children.group.layout.children.stub.near;
+        nested = near.children.stub.nested;
+        nestedDeeper = nested.children.stub.nestedDeeper;
+        host = top.children.system.x86_64-linux.children.machine.host;
+      in
+      selected top == [ ]
+      && selected top.children.group.layout == [ "for all" ]
+      && selected near == [
+        "for all"
+        "from the holder"
+        "from the group"
+      ]
+      && selected host == [
+        "for all"
+        "from the holder"
+      ]
+      && selected nested == [
+        "for all"
+        "from near"
+      ]
+      && selected nestedDeeper == [ "for all" ]
+      && near.class == "stub"
+      && entriesOf near == [
+        {
+          file = "all.nix";
+          level = [ ];
+          nearest = false;
+        }
+        {
+          file = "holder.nix";
+          level = [ ];
+          nearest = true;
+        }
+        {
+          file = "group.nix";
+          level = [
+            {
+              type = "group";
+              name = "layout";
+            }
+          ];
+          nearest = true;
+        }
+      ];
 
     # `elide` keeps, of each path, its last segment and the segments
     # where paths that end in the same name fork. A name that is alone

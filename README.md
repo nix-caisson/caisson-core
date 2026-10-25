@@ -660,6 +660,37 @@ How they are inherited:
   architecture there, and a configuration evaluated once can return a
   list to narrow what its children are evaluated for.
 
+### What an evaluation gives the nearest configurations of a class
+
+An integration passes `class`, the module class of its evaluations,
+to `mkConfiguration`. It is recorded on the manifest as `class`, null
+when the integration passes none. `evaluate` may then also return
+`forNearestChildren`, with one field, `extraDefaultModuleImports`, of
+the same shape as the field of `forChildren`. It is read from the
+childless evaluation and recorded on the manifest as
+`forNearestChildren`.
+
+An addition for class C reaches the nearest configurations of class C
+beneath the evaluation:
+
+- It passes through configurations of other classes, configurations
+  with no class, and systems.
+- At each configuration of class C it reaches, it is placed in
+  `defaultModuleImports.C` after the selections that configuration
+  inherits, with its `level`, its `file` and `nearest = true`. The
+  additions that reach the same configuration are in tree order, those
+  from the top first.
+- The configurations beneath that configuration do not inherit it. A
+  configuration of class C passes on its own additions for C, which
+  connect at the next configurations of class C beneath it.
+- The additions on their way down are carried on each manifest as
+  `nearestPending`, by class.
+
+A level adds a module this way when the configurations directly
+beneath it live on what it describes, such as the deployment of a
+colmena node or the disk layout of a machine. A NixOS configuration
+declared inside such a machine does not get it.
+
 ### Telling names apart: `elide`
 
 `caisson-core.elide paths` gives, for each of a set of things in a

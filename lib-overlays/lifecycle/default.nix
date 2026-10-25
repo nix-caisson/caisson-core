@@ -681,14 +681,28 @@ let
   # `select` the selection, `file` the file that gave it, as the
   # integration of `parent` records it, and `level` the name path of
   # `parent`, which caisson-core adds here.
+  #
+  # The additions for the nearest children (`forNearestChildren`) are
+  # not among the defaults a manifest inherits. A manifest beneath
+  # `parent` receives them as `nearestPending` (`nearestPendingBeneath`),
+  # and a configuration of their class adds them to its own default
+  # (`connectNearest`). The entries a configuration added that way
+  # carry `nearest = true`, and this function leaves them out of what
+  # the configurations beneath it inherit.
   inheritedFrom =
     parent:
     let
       given = parent.forChildren or { };
-      defaultsAbove = parent.defaultModuleImports or { };
+      defaultsAbove = builtins.mapAttrs (_: builtins.filter (entry: !(entry.nearest or false))) (
+        parent.defaultModuleImports or { }
+      );
       level = namePathOf parent;
     in
     builtins.intersectAttrs inheritedFields parent
+    // {
+      nearestPending = nearestPendingBeneath parent;
+    }
+    // (if parent ? defaultModuleImports then { defaultModuleImports = defaultsAbove; } else { })
     // (
       if parent ? forChildren then
         {
@@ -736,6 +750,61 @@ let
         { }
     );
 
+  # The additions for the nearest children that a manifest beneath
+  # `parent` receives, by class: those that reached `parent` and did
+  # not connect there, then those `parent` gives
+  # (`forNearestChildren.extraDefaultModuleImports`). An addition
+  # connects at a configuration of its class, so a configuration of
+  # class C passes on none of the additions for C that reached it. A
+  # configuration of another class, a system, and a configuration
+  # with no class pass them on unchanged. Each entry is a default
+  # selection as `inheritedFrom` describes it, with `level`, the name
+  # path of the level that gave it, and `nearest = true`. The entries
+  # of a class are in tree order, those of the levels above first.
+  nearestPendingBeneath =
+    parent:
+    let
+      reached = parent.nearestPending or { };
+      connectedHere = parent.class or null;
+      passed = if connectedHere == null then reached else builtins.removeAttrs reached [ connectedHere ];
+      level = namePathOf parent;
+      given = builtins.mapAttrs (
+        _:
+        builtins.map (
+          entry:
+          entry
+          // {
+            inherit level;
+            nearest = true;
+          }
+        )
+      ) ((parent.forNearestChildren or { }).extraDefaultModuleImports or { });
+    in
+    passed // builtins.mapAttrs (class: entries: (passed.${class} or [ ]) ++ entries) given;
+
+  # The fields a configuration of class `class` inherits from `parent`
+  # (`inheritedFrom`), with the additions for the nearest children of
+  # that class that reached it placed after the default of that class
+  # it inherits. They connect there, and the configurations beneath it
+  # do not inherit them.
+  connectNearest =
+    class: parent:
+    let
+      inherited = inheritedFrom parent;
+      defaults = inherited.defaultModuleImports or { };
+    in
+    if class == null then
+      inherited
+    else
+      inherited
+      // {
+        defaultModuleImports =
+          defaults
+          // {
+            ${class} = (defaults.${class} or [ ]) ++ (inherited.nearestPending.${class} or [ ]);
+          };
+      };
+
   # The fields `mkConfiguration` writes, which an integration's `record`
   # may not name.
   configurationFields = [
@@ -744,12 +813,15 @@ let
     "childless"
     "childlessManifest"
     "children"
+    "class"
     "defaultModuleImports"
     "forChildren"
+    "forNearestChildren"
     "history"
     "inputs"
     "name"
     "nearest"
+    "nearestPending"
     "outputs"
     "parent"
     "system"
@@ -787,6 +859,22 @@ let
   # manifest of an evaluation holds the default selections in force
   # at it as `defaultModuleImports`, each with the name path of the
   # level that gave it as `level`.
+  #
+  # `class` is the module class of the evaluation, null for an
+  # evaluation that has none. It is recorded on the manifest. `evaluate`
+  # may also return `forNearestChildren`, what the evaluation gives the
+  # nearest configurations of a class beneath it:
+  # `extraDefaultModuleImports`, by class a list of default selections
+  # of the same shape as those of `forChildren`. It is read from the
+  # childless view. An addition for class C passes through the
+  # configurations of other classes and the systems beneath the
+  # evaluation, and it is added to the default of C at each
+  # configuration of class C it reaches, after the default that
+  # configuration inherits. The configurations beneath such a
+  # configuration do not inherit it. In `defaultModuleImports` such an
+  # entry carries `nearest = true` beside its `level` and `file`. The
+  # additions on their way down are carried as `nearestPending`
+  # (`nearestPendingBeneath`).
   #
   # `evaluate` may also return `events`, the events the evaluation
   # records, in the order they happened: each with its `operation`
@@ -845,6 +933,7 @@ let
     {
       type,
       evaluate,
+      class ? null,
       record ? { },
       recordFromEvaluation ? [ ],
       perSystem ? false,
@@ -869,11 +958,11 @@ let
       # `name` beneath `parent`.
       baseUnder =
         parent:
-        inheritedFrom parent
+        connectNearest class parent
         // checkedRecord
         // {
           _type = "caisson-manifest";
-          inherit type parent;
+          inherit type class parent;
           ancestors = (parent.ancestors or [ ]) ++ [ parent ];
           # The nearest ancestor of each integration. A lib is the root
           # of the chain and no integration, so it is not among them.
@@ -965,6 +1054,10 @@ let
                     extraDefaultModuleImports = (evaluated.forChildren or { }).extraDefaultModuleImports or { };
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
                     systems = (evaluated.forChildren or { }).systems or null;
+                  };
+                  forNearestChildren = {
+                    extraDefaultModuleImports =
+                      (evaluated.forNearestChildren or { }).extraDefaultModuleImports or { };
                   };
                 }
                 // builtins.listToAttrs (
