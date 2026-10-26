@@ -521,6 +521,190 @@ let
 
   isManifest = value: builtins.isAttrs value && (value._type or null) == "caisson-manifest";
 
+  # A deferred configuration: a configuration whose evaluation waits
+  # for args, values supplied after the flake is evaluated, such as
+  # the outputs of the resources a deployment tool applies.
+  # `configuration` is a function of exactly `{ name, parent, args }`
+  # returning a manifest, as a configuration is a function of exactly
+  # `{ name, parent }`, so neither can be finalized as the other.
+  # `type` and `class` are known before any args are, so the parent
+  # records them, and the additions for the nearest children of the
+  # class connect at the deferred configuration. `argsNeeded` declares
+  # the args it takes: an attrset whose leaves are made by `mkArg`, or
+  # a function from the args known so far to one, for args whose
+  # existence depends on other args. `discoverArgs`, optional, is a
+  # derivation whose program prints the args it can find as JSON on
+  # its standard output.
+  mkDeferredConfiguration =
+    {
+      type,
+      class ? null,
+      argsNeeded,
+      discoverArgs ? null,
+      configuration,
+    }:
+    let
+      expected = {
+        name = false;
+        parent = false;
+        args = false;
+      };
+    in
+    if !(builtins.isFunction configuration && builtins.functionArgs configuration == expected) then
+      builtins.throw ''
+        caisson-core.mkDeferredConfiguration: the `${type}` deferred configuration's
+        `configuration` must be a function of exactly `{ name, parent, args }`
+        returning a manifest.
+      ''
+    else
+      {
+        _type = "caisson-deferred-configuration";
+        inherit
+          type
+          class
+          argsNeeded
+          discoverArgs
+          configuration
+          ;
+      };
+
+  isDeferredConfiguration =
+    value: builtins.isAttrs value && (value._type or null) == "caisson-deferred-configuration";
+
+  # The entry a parent holds under `children` for a deferred child:
+  # its name, type and class, the parent it is finalized against (the
+  # childless manifest of the parent), `argsNeeded`, `discoverArgs`,
+  # and `finalize`, which takes `{ args, argsSource ? null }` and
+  # returns the deferred child's manifest (`finalizeDeferredChild`).
+  # Nothing in it is evaluated at flake time beyond these.
+  isDeferred = value: builtins.isAttrs value && (value._type or null) == "caisson-deferred";
+
+  deferChild =
+    {
+      name,
+      parent,
+      what ? "`${name}`",
+    }:
+    child:
+    if !(isDeferredConfiguration child) then
+      builtins.throw "${what} is declared with a ${builtins.typeOf child} where caisson-core.deferChild expects a deferred configuration (`mkDeferredConfiguration`)."
+    else
+      {
+        _type = "caisson-deferred";
+        inherit name parent;
+        inherit (child)
+          type
+          class
+          argsNeeded
+          discoverArgs
+          ;
+        finalize =
+          {
+            args,
+            argsSource ? null,
+          }:
+          finalizeDeferredChild {
+            inherit
+              name
+              parent
+              args
+              argsSource
+              what
+              ;
+          } child;
+      };
+
+  # Finalize a deferred configuration with its args: call it with the
+  # name it is declared under, its parent and the args, and record on
+  # the manifest which args it was given and where they came from
+  # (`deferred`), never their values. `argsSource` is free text a tool
+  # supplies, such as "discovered 2026-10-26T14:02Z by nixops4 state
+  # dump"; null when nobody says.
+  finalizeDeferredChild =
+    {
+      name,
+      parent,
+      args,
+      argsSource ? null,
+      what ? "`${builtins.toString name}`",
+    }:
+    child:
+    if !(isDeferredConfiguration child) then
+      builtins.throw "${what} is not a deferred configuration (`mkDeferredConfiguration`), so caisson-core.finalizeDeferredChild cannot finalize it."
+    else
+      let
+        result = child.configuration { inherit name parent args; };
+      in
+      if isManifest result then
+        result
+        // {
+          deferred = {
+            argNames = argNamesOf (argsNeededFor child args);
+            source = argsSource;
+          };
+        }
+      else
+        builtins.throw "The deferred configuration ${what} did not return a manifest.";
+
+  # One arg a deferred configuration takes, a leaf of `argsNeeded`.
+  # `cacheable` says whether a tool may keep a value it discovered in a
+  # cache only its user can read; it is false unless the integration
+  # or the user marks the arg. `type` is optional, for a tool that
+  # checks args a user gives.
+  mkArg =
+    {
+      cacheable ? false,
+      type ? null,
+      description ? null,
+    }:
+    {
+      _type = "caisson-arg";
+      inherit cacheable type description;
+    };
+
+  isArg = value: builtins.isAttrs value && (value._type or null) == "caisson-arg";
+
+  # The `argsNeeded` of a deferred configuration or entry, given the
+  # args known so far.
+  argsNeededFor =
+    deferred: known:
+    if builtins.isFunction deferred.argsNeeded then deferred.argsNeeded known else deferred.argsNeeded;
+
+  # The name paths of the args an `argsNeeded` declares, each a list of
+  # names.
+  argNamesOf =
+    needed:
+    let
+      walk =
+        path: value:
+        if isArg value then
+          [ path ]
+        else if builtins.isAttrs value then
+          builtins.concatMap (name: walk (path ++ [ name ]) value.${name}) (builtins.attrNames value)
+        else
+          [ ];
+    in
+    walk [ ] needed;
+
+  # Stand-ins for the args an `argsNeeded` declares: the same shape,
+  # each leaf an error naming the arg, with the fixed marker
+  # `caisson-deferred: needs <path>`. A tool that evaluates a deferred
+  # configuration ahead of time passes them for the args it does not
+  # have and reads the marker from the error text.
+  standInsFor =
+    needed:
+    let
+      walk =
+        path: value:
+        if isArg value then
+          builtins.throw "caisson-deferred: needs ${builtins.concatStringsSep "." path}"
+        else if builtins.isAttrs value then
+          builtins.mapAttrs (name: walk (path ++ [ name ])) value
+        else
+          value;
+    in
+    walk [ ] needed;
+
   # The evaluations of a configuration evaluated at a system: manifests
   # by system.
   isEvaluations =
@@ -541,6 +725,9 @@ let
       _type = "caisson-manifest";
       type = "system";
       name = system;
+      # The parent the system stands under, whose `forDirectChildren`
+      # the configurations evaluated at the system receive.
+      directParent = parent;
       inherit
         system
         parent
@@ -551,9 +738,17 @@ let
       nearest =
         (parent.nearest or { })
         // (if (parent.type or "lib") == "lib" then { } else { ${parent.type} = parent; });
-      inputs = builtins.concatMap builtins.attrValues (builtins.attrValues children);
+      inputs = evaluatedChildren children;
       history = historyWithChildren (parent.history or [ ]) children;
     };
+
+  # The children, by integration and then name, that are manifests,
+  # leaving out the entries of deferred children.
+  evaluatedChildren =
+    children:
+    builtins.filter (child: !(isDeferred child)) (
+      builtins.concatMap builtins.attrValues (builtins.attrValues children)
+    );
 
   # The name path of a manifest: the `{ type, name }` of every manifest
   # beneath the top down to it, which is its address under `children`
@@ -632,7 +827,9 @@ let
     prefix: children:
     let
       length = builtins.length prefix;
-      beneath = builtins.concatMap builtins.attrValues (builtins.attrValues children);
+      # A deferred child has no history until it is finalized with its
+      # args.
+      beneath = evaluatedChildren children;
     in
     prefix
     ++ builtins.concatMap (
@@ -664,6 +861,10 @@ let
     root = null;
     sources = null;
     systems = null;
+    # By class, the level whose full evaluation the configurations of
+    # that class beneath read, as `forChildren.unsafeCrossChildReferences`
+    # gave it: the childless manifest of the nearest parent that set it.
+    crossChildFrom = null;
   };
 
   # What a manifest beneath `parent` inherits from it: the fields
@@ -688,19 +889,33 @@ let
   # and a configuration of their class adds them to its own default
   # (`connectNearest`). The entries a configuration added that way
   # carry `nearest = true`, and this function leaves them out of what
-  # the configurations beneath it inherit.
+  # the configurations beneath it inherit. So does it leave out the
+  # entries a configuration received from its parent's
+  # `forDirectChildren`, which carry `direct = true`.
+  #
+  # `crossChildFrom` holds, by class, the level whose full evaluation
+  # the configurations of that class beneath read
+  # (`forChildren.unsafeCrossChildReferences`): `parent` itself for a
+  # class it sets, else what reached `parent`, so the nearest parent
+  # that set it wins.
   inheritedFrom =
     parent:
     let
       given = parent.forChildren or { };
-      defaultsAbove = builtins.mapAttrs (_: builtins.filter (entry: !(entry.nearest or false))) (
-        parent.defaultModuleImports or { }
-      );
+      defaultsAbove = builtins.mapAttrs (
+        _: builtins.filter (entry: !(entry.nearest or false) && !(entry.direct or false))
+      ) (parent.defaultModuleImports or { });
       level = namePathOf parent;
     in
     builtins.intersectAttrs inheritedFields parent
     // {
       nearestPending = nearestPendingBeneath parent;
+      nearestCrossPending = nearestCrossPendingBeneath parent;
+      crossChildFrom =
+        (parent.crossChildFrom or { })
+        // builtins.mapAttrs (_: _: parent) (
+          filterTrue ((parent.forChildren or { }).unsafeCrossChildReferences or { })
+        );
     }
     // (if parent ? defaultModuleImports then { defaultModuleImports = defaultsAbove; } else { })
     // (
@@ -782,16 +997,83 @@ let
     in
     passed // builtins.mapAttrs (class: entries: (passed.${class} or [ ]) ++ entries) given;
 
+  # Whether an evaluation sets `unsafeCrossChildReferences` for some
+  # class in any of the three containers, read from what its
+  # integration's `evaluate` returned.
+  crossChildSetBy =
+    evaluated:
+    builtins.any
+      (container: filterTrue ((evaluated.${container} or { }).unsafeCrossChildReferences or { }) != { })
+      [
+        "forChildren"
+        "forNearestChildren"
+        "forDirectChildren"
+      ];
+
+  # The classes an attrset of flags by class sets to true.
+  filterTrue =
+    flags:
+    builtins.removeAttrs flags (
+      builtins.filter (class: flags.${class} != true) (builtins.attrNames flags)
+    );
+
+  # The settings of `forNearestChildren.unsafeCrossChildReferences`
+  # that a manifest beneath `parent` receives, by class: the childless
+  # manifest of the level that set it. They pass on as the additions
+  # for the nearest children do (`nearestPendingBeneath`): a
+  # configuration of class C connects the setting for C and passes it
+  # no further. A level's own setting replaces one that reached it, so
+  # the nearest parent that set it wins.
+  nearestCrossPendingBeneath =
+    parent:
+    let
+      reached = parent.nearestCrossPending or { };
+      connectedHere = parent.class or null;
+      passed = if connectedHere == null then reached else builtins.removeAttrs reached [ connectedHere ];
+    in
+    passed
+    // builtins.mapAttrs (_: _: parent) (
+      filterTrue ((parent.forNearestChildren or { }).unsafeCrossChildReferences or { })
+    );
+
   # The fields a configuration of class `class` inherits from `parent`
   # (`inheritedFrom`), with the additions for the nearest children of
   # that class that reached it placed after the default of that class
-  # it inherits. They connect there, and the configurations beneath it
-  # do not inherit them.
+  # it inherits, and the additions its parent gives its direct children
+  # of that class (`forDirectChildren`) after those. They connect
+  # there, and the configurations beneath it do not inherit them.
+  #
+  # A system between a parent and the configurations it evaluates per
+  # system is no level of its own: `directParent` names the parent the
+  # system stands under, whose `forDirectChildren` its configurations
+  # receive.
+  #
+  # `crossChildLevel` is the full manifest of the level whose children
+  # this configuration may read (`unsafeCrossChildReferences`), null
+  # where none set it for the class. A setting through
+  # `forDirectChildren` beats one through `forNearestChildren`, which
+  # beats one through `forChildren`. A setting through
+  # `forNearestChildren` connects here whether or not it wins.
   connectNearest =
     class: parent:
     let
       inherited = inheritedFrom parent;
       defaults = inherited.defaultModuleImports or { };
+      directParent = parent.directParent or parent;
+      directGiven = directParent.forDirectChildren or { };
+      direct = builtins.map (
+        entry:
+        entry
+        // {
+          level = namePathOf directParent;
+          direct = true;
+        }
+      ) ((directGiven.extraDefaultModuleImports or { }).${class} or [ ]);
+      crossLevel =
+        if ((directGiven.unsafeCrossChildReferences or { }).${class} or false) == true then
+          directParent
+        else
+          inherited.nearestCrossPending.${class} or (inherited.crossChildFrom.${class} or null);
     in
     if class == null then
       inherited
@@ -801,8 +1083,10 @@ let
         defaultModuleImports =
           defaults
           // {
-            ${class} = (defaults.${class} or [ ]) ++ (inherited.nearestPending.${class} or [ ]);
+            ${class} = (defaults.${class} or [ ]) ++ (inherited.nearestPending.${class} or [ ]) ++ direct;
           };
+        crossChildLevel = if crossLevel == null then null else crossLevel.crossChildFull;
+        crossChildLevelPath = if crossLevel == null then null else namePathOf crossLevel;
       };
 
   # The fields `mkConfiguration` writes, which an integration's `record`
@@ -810,14 +1094,23 @@ let
   configurationFields = [
     "_type"
     "ancestors"
+    "args"
     "childless"
     "childlessManifest"
     "children"
     "class"
+    "crossChildFrom"
+    "crossChildFull"
+    "crossChildLevel"
+    "crossChildLevelPath"
     "defaultModuleImports"
+    "deferred"
+    "directParent"
     "forChildren"
+    "forDirectChildren"
     "forNearestChildren"
     "history"
+    "nearestCrossPending"
     "inputs"
     "name"
     "nearest"
@@ -875,6 +1168,13 @@ let
   # entry carries `nearest = true` beside its `level` and `file`. The
   # additions on their way down are carried as `nearestPending`
   # (`nearestPendingBeneath`).
+  #
+  # `evaluate` may also return `forDirectChildren`, with the same
+  # per-class `extraDefaultModuleImports`, for the configurations of
+  # the class declared directly beneath it (`connectNearest`). Each of
+  # the three may hold `unsafeCrossChildReferences`, by class a
+  # boolean: the configurations of the class it reaches read the full
+  # evaluation of this one as `crossChildLevel`.
   #
   # `evaluate` may also return `events`, the events the evaluation
   # records, in the order they happened: each with its `operation`
@@ -1006,12 +1306,16 @@ let
             builtins.removeAttrs kept (
               builtins.filter (integration: kept.${integration} == { }) (builtins.attrNames kept)
             );
-          direct = select (finalized: if isManifest finalized then finalized else null);
+          # A deferred child is held under its integration, as a
+          # configuration evaluated once is.
+          direct = select (
+            finalized: if isManifest finalized || isDeferred finalized then finalized else null
+          );
           systems = builtins.attrNames (
             builtins.foldl' (
               seen: byName:
               builtins.foldl' (
-                seen: finalized: if isManifest finalized then seen else seen // finalized
+                seen: finalized: if isManifest finalized || isDeferred finalized then seen else seen // finalized
               ) seen (builtins.attrValues byName)
             ) { } (builtins.attrValues declared)
           );
@@ -1023,7 +1327,8 @@ let
                 inherit system;
                 childless = false;
                 children = select (
-                  finalized: if isManifest finalized then null else finalized.${system} or null
+                  finalized:
+                  if isManifest finalized || isDeferred finalized then null else finalized.${system} or null
                 );
               };
             }) systems
@@ -1054,12 +1359,34 @@ let
                     extraDefaultModuleImports = (evaluated.forChildren or { }).extraDefaultModuleImports or { };
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
                     systems = (evaluated.forChildren or { }).systems or null;
+                    unsafeCrossChildReferences = (evaluated.forChildren or { }).unsafeCrossChildReferences or { };
                   };
                   forNearestChildren = {
                     extraDefaultModuleImports =
                       (evaluated.forNearestChildren or { }).extraDefaultModuleImports or { };
+                    unsafeCrossChildReferences =
+                      (evaluated.forNearestChildren or { }).unsafeCrossChildReferences or { };
+                  };
+                  forDirectChildren = {
+                    extraDefaultModuleImports =
+                      (evaluated.forDirectChildren or { }).extraDefaultModuleImports or { };
+                    unsafeCrossChildReferences =
+                      (evaluated.forDirectChildren or { }).unsafeCrossChildReferences or { };
                   };
                 }
+                // (
+                  # The full manifest, for the configurations beneath
+                  # that read it (`unsafeCrossChildReferences`), on the
+                  # childless manifest of a level that sets it for some
+                  # class. Elsewhere null, so a manifest refers to its
+                  # full evaluation only where a level asked for it.
+                  if childless then
+                    {
+                      crossChildFull = if crossChildSetBy evaluated then fullManifest else null;
+                    }
+                  else
+                    { }
+                )
                 // builtins.listToAttrs (
                   builtins.map (field: {
                     name = field;
@@ -1073,7 +1400,7 @@ let
                       if childless then
                         [ ]
                       else
-                        [ childlessManifest ] ++ builtins.concatMap builtins.attrValues (builtins.attrValues children)
+                        [ childlessManifest ] ++ evaluatedChildren children
                     );
                   # The history of the childless view is the history of
                   # its parent, then the events its evaluation records.
@@ -1090,8 +1417,9 @@ let
             in
             manifest;
           childlessManifest = view true;
+          fullManifest = view false;
         in
-        view false;
+        fullManifest;
 
       # The evaluations of a configuration evaluated at a system: for
       # every system in force where it is declared, the evaluation
@@ -1221,6 +1549,36 @@ let
         builtins.concatMap render (builtins.genList (depth: depth) (builtins.length path));
     in
     builtins.map segmentsOf indices;
+
+  # Finalize a deferred configuration as a top with its args: a
+  # deferred top keeps the composition of the lib it is finalized
+  # under, as a top does, rather than inheriting the composition of a
+  # parent. Its name is the name the composition declares on mkLib,
+  # and its parent is the lib's manifest.
+  finalizeDeferredTopFor =
+    final:
+    {
+      args,
+      argsSource ? null,
+    }:
+    configuration:
+    let
+      libManifest = final.caisson-core.libManifest;
+    in
+    if libManifest == null then
+      builtins.throw ''
+        caisson-core.finalizeDeferredTop finalizes a deferred configuration under a
+        composition's manifest, but this library carries none at
+        `caisson-core.libManifest`. Compose the library with
+        caisson-core.mkLib, which captures a manifest.
+      ''
+    else
+      finalizeDeferredChild {
+        name = libManifest.name or null;
+        parent = libManifest;
+        inherit args argsSource;
+        what = "The deferred top configuration";
+      } configuration;
 
   # Finalize the configuration a top ends with: a top has no parent
   # that declares it under an attribute, so it takes the name the
@@ -2424,20 +2782,32 @@ in
   overlay = final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
       inherit
+        argNamesOf
+        argsNeededFor
         coreEntries
+        deferChild
         definers
         ecosystemSrc
         elide
         finalizeChild
+        finalizeDeferredChild
         importApply
+        isArg
+        isDeferred
+        isDeferredConfiguration
+        isManifest
         manifestOf
+        mkArg
+        mkDeferredConfiguration
         mkExtendedLib
         mkLib
         namePathOf
         pkgOverlaysFor
+        standInsFor
         ;
       mkConfiguration = mkConfigurationFor final;
       finalizeTop = finalizeTopFor final;
+      finalizeDeferredTop = finalizeDeferredTopFor final;
       mkPkgOverlay = mkPkgOverlayFor {
         sources = closure-inputs;
         finalLib = final;
