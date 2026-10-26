@@ -2794,6 +2794,62 @@ let
           ]
         ];
 
+    # A function `argsNeeded` is called with the name and parent the
+    # entry holds and the args known so far, so the args a deferred
+    # child takes may depend on what it declares, and the manifest
+    # records the arg names it computes for the args given.
+    lifecycleArgsNeededSeesNameAndParent =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        child = composed.caisson-core.mkDeferredConfiguration {
+          type = "stub";
+          argsNeeded =
+            {
+              name,
+              parent,
+              args,
+            }:
+            {
+              ${name}.${parent.type} = composed.caisson-core.mkArg { };
+            }
+            // (if args ? first then { second = composed.caisson-core.mkArg { }; } else { });
+          configuration =
+            {
+              name,
+              parent,
+              args,
+            }:
+            stubIntegration "stub" composed (_lib: { }) { inherit name parent; };
+        };
+        entry = composed.caisson-core.deferChild {
+          name = "member";
+          parent = composed.caisson-core.libManifest;
+        } child;
+      in
+      core.argNamesOf (core.argsNeededFor entry { }) == [
+        [
+          "member"
+          "lib"
+        ]
+      ]
+      && core.argNamesOf (core.argsNeededFor entry { first = 1; }) == [
+        [
+          "member"
+          "lib"
+        ]
+        [ "second" ]
+      ]
+      && (entry.finalize { args.first = 1; }).deferred.argNames == [
+        [
+          "member"
+          "lib"
+        ]
+        [ "second" ]
+      ];
+
     # A deferred top is finalized under the lib's manifest with the
     # name the composition declares, as a top is, and records its args.
     lifecycleDeferredTop =

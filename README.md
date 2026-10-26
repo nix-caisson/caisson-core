@@ -749,7 +749,7 @@ makes one:
 | Argument | Meaning |
 | --- | --- |
 | `type`, `class` | the integration and module class, known before any args are |
-| `argsNeeded` | the args it takes: an attrset whose leaves are made by `mkArg { cacheable ? false; type ? null; description ? null; }`, or a function from the args known so far to one |
+| `argsNeeded` | the args it takes: an attrset whose leaves are made by `mkArg { cacheable ? false; type ? null; description ? null; }`, or a function of `{ name, parent, args }`, with the args known so far, returning one |
 | `discoverArgs` | optional, a derivation whose program prints the args it can find as JSON on its standard output |
 | `configuration` | a function of exactly `{ name, parent, args }` returning a manifest |
 
@@ -774,8 +774,9 @@ the lib, as `finalizeTop` does.
 which throws `caisson-deferred: needs <path>` when read, for a tool
 that evaluates a deferred configuration ahead of time and reads which
 arg an evaluation is blocked on from the error.
-`argsNeededFor deferred known` reads `argsNeeded` given the args known
-so far, and `argNamesOf` lists its name paths.
+`argsNeededFor entry known` reads the `argsNeeded` of an entry given
+the args known so far, calling a function `argsNeeded` with the name
+and parent the entry holds, and `argNamesOf` lists its name paths.
 
 ### Telling names apart: `elide`
 

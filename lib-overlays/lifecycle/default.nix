@@ -531,8 +531,9 @@ let
   # records them, and the additions for the nearest children of the
   # class connect at the deferred configuration. `argsNeeded` declares
   # the args it takes: an attrset whose leaves are made by `mkArg`, or
-  # a function from the args known so far to one, for args whose
-  # existence depends on other args. `discoverArgs`, optional, is a
+  # a function of `{ name, parent, args }`, the args known so far,
+  # returning one, for args whose existence depends on other args or on
+  # what is declared beneath it. `discoverArgs`, optional, is a
   # derivation whose program prints the args it can find as JSON on
   # its standard output.
   mkDeferredConfiguration =
@@ -639,7 +640,7 @@ let
         result
         // {
           deferred = {
-            argNames = argNamesOf (argsNeededFor child args);
+            argNames = argNamesOf (argsNeededFor (child // { inherit name parent; }) args);
             source = argsSource;
           };
         }
@@ -664,11 +665,19 @@ let
 
   isArg = value: builtins.isAttrs value && (value._type or null) == "caisson-arg";
 
-  # The `argsNeeded` of a deferred configuration or entry, given the
-  # args known so far.
+  # The `argsNeeded` of a deferred child's entry, given the args known
+  # so far. A function `argsNeeded` is called with the name and parent
+  # the entry holds and those args, as the configuration is, since
+  # which args exist may depend on what is declared beneath it.
   argsNeededFor =
-    deferred: known:
-    if builtins.isFunction deferred.argsNeeded then deferred.argsNeeded known else deferred.argsNeeded;
+    entry: known:
+    if builtins.isFunction entry.argsNeeded then
+      entry.argsNeeded {
+        inherit (entry) name parent;
+        args = known;
+      }
+    else
+      entry.argsNeeded;
 
   # The name paths of the args an `argsNeeded` declares, each a list of
   # names.
