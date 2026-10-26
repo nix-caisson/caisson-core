@@ -2828,7 +2828,15 @@ let
           name = "member";
           parent = composed.caisson-core.libManifest;
         } child;
+        # A function `discoverArgs` sees the same name and parent.
+        discovering = composed.caisson-core.deferChild {
+          name = "member";
+          parent = composed.caisson-core.libManifest;
+        } (child // { discoverArgs = { name, parent }: { x86_64-linux = "${name} under ${parent.type}"; }; });
       in
+      core.discoverArgsFor discovering == { x86_64-linux = "member under lib"; }
+      && core.discoverArgsFor entry == null
+      &&
       core.argNamesOf (core.argsNeededFor entry { }) == [
         [
           "member"

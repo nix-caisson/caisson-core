@@ -324,7 +324,7 @@ Under `caisson-core`:
 | Package overlays | `pkgOverlaysFor` |
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `namePathOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide`, `isManifest` |
-| Deferred configurations | `mkDeferredConfiguration`, `deferChild`, `finalizeDeferredChild`, `finalizeDeferredTop`, `isDeferred`, `isDeferredConfiguration`, `mkArg`, `isArg`, `argsNeededFor`, `argNamesOf`, `standInsFor` |
+| Deferred configurations | `mkDeferredConfiguration`, `deferChild`, `finalizeDeferredChild`, `finalizeDeferredTop`, `isDeferred`, `isDeferredConfiguration`, `mkArg`, `isArg`, `argsNeededFor`, `discoverArgsFor`, `argNamesOf`, `standInsFor` |
 | Sources | `ecosystemSrc` |
 | Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
 | Attribute sets | `attrsets.genAttrs`, `attrsets.filterAttrs` |
@@ -750,7 +750,7 @@ makes one:
 | --- | --- |
 | `type`, `class` | the integration and module class, known before any args are |
 | `argsNeeded` | the args it takes: an attrset whose leaves are made by `mkArg { cacheable ? false; type ? null; description ? null; }`, or a function of `{ name, parent, args }`, with the args known so far, returning one |
-| `discoverArgs` | optional, a derivation whose program prints the args it can find as JSON on its standard output |
+| `discoverArgs` | optional, a derivation whose program prints the args it can find as JSON on its standard output, an attrset of such derivations by system, for a program that runs on the system of the tool, or a function of `{ name, parent }` returning either |
 | `configuration` | a function of exactly `{ name, parent, args }` returning a manifest |
 
 A parent holds a deferred child under `children` as an entry that
@@ -777,6 +777,8 @@ arg an evaluation is blocked on from the error.
 `argsNeededFor entry known` reads the `argsNeeded` of an entry given
 the args known so far, calling a function `argsNeeded` with the name
 and parent the entry holds, and `argNamesOf` lists its name paths.
+`discoverArgsFor entry` reads the `discoverArgs` of an entry the same
+way: null, a derivation, or derivations by system.
 
 ### Telling names apart: `elide`
 

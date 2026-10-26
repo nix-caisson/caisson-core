@@ -535,7 +535,9 @@ let
   # returning one, for args whose existence depends on other args or on
   # what is declared beneath it. `discoverArgs`, optional, is a
   # derivation whose program prints the args it can find as JSON on
-  # its standard output.
+  # its standard output, an attrset of such derivations by system, for
+  # a program that runs on the system of the tool, or a function of
+  # `{ name, parent }` returning either (`discoverArgsFor`).
   mkDeferredConfiguration =
     {
       type,
@@ -678,6 +680,17 @@ let
       }
     else
       entry.argsNeeded;
+
+  # The `discoverArgs` of a deferred child's entry: null, a derivation,
+  # or derivations by system. A function `discoverArgs` is called with
+  # the name and parent the entry holds, since the program may depend
+  # on the package sets in force there.
+  discoverArgsFor =
+    entry:
+    if builtins.isFunction entry.discoverArgs then
+      entry.discoverArgs { inherit (entry) name parent; }
+    else
+      entry.discoverArgs;
 
   # The name paths of the args an `argsNeeded` declares, each a list of
   # names.
@@ -2793,6 +2806,7 @@ in
       inherit
         argNamesOf
         argsNeededFor
+        discoverArgsFor
         coreEntries
         deferChild
         definers
