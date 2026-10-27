@@ -743,15 +743,19 @@ A deferred configuration is a configuration whose evaluation waits
 for args: values supplied after the flake is evaluated, such as the
 outputs of resources a deployment tool applies.
 
-`mkDeferredConfiguration { type; class ? null; argsNeeded; discoverArgs ? null; configuration; }`
+`mkDeferredConfiguration { type; class ? null; argsNeeded; discoverArgs ? ({ name, parent, system }: null); configuration; }`
 makes one:
 
 | Argument | Meaning |
 | --- | --- |
 | `type`, `class` | the integration and module class, known before any args are |
-| `argsNeeded` | the args it takes: an attrset whose leaves are made by `mkArg { cacheable ? false; type ? null; description ? null; }`, or a function of `{ name, parent, args }`, with the args known so far, returning one |
-| `discoverArgs` | optional, a derivation whose program prints the args it can find as JSON on its standard output, an attrset of such derivations by system, for a program that runs on the system of the tool, or a function of `{ name, parent }` returning either |
+| `argsNeeded` | a function of `{ name, parent, args }`, with the args known so far, returning the args it takes: an attrset whose leaves are made by `mkArg { cacheable ? false; type ? null; description ? null; }` |
+| `discoverArgs` | a function of `{ name, parent, system }` returning a derivation whose program, built for and run on `system`, prints the args it can find as JSON on its standard output; or null. The default returns null |
 | `configuration` | a function of exactly `{ name, parent, args }` returning a manifest |
+
+Each of the three functions is refused unless it takes exactly the
+arguments named here, so a value meant for one cannot be given as
+another.
 
 A parent holds a deferred child under `children` as an entry that
 `deferChild { name; parent; } child` makes: its name, type, class,
@@ -770,15 +774,16 @@ the args and where they came from, never their values.
 finalizes a deferred configuration as a top, against the manifest of
 the lib, as `finalizeTop` does.
 
-`standInsFor argsNeeded` returns stand-ins of the same shape, each of
-which throws `caisson-deferred: needs <path>` when read, for a tool
-that evaluates a deferred configuration ahead of time and reads which
-arg an evaluation is blocked on from the error.
-`argsNeededFor entry known` reads the `argsNeeded` of an entry given
-the args known so far, calling a function `argsNeeded` with the name
-and parent the entry holds, and `argNamesOf` lists its name paths.
-`discoverArgsFor entry` reads the `discoverArgs` of an entry the same
-way: null, a derivation, or derivations by system.
+`argsNeededFor entry known` calls the `argsNeeded` of an entry with the
+name and parent the entry holds and the args known so far, and
+`argNamesOf` lists the name paths of what it returns.
+`standInsFor needed` returns stand-ins of the same shape, each of which
+throws `caisson-deferred: needs <path>` when read, for a tool that
+evaluates a deferred configuration ahead of time and reads which arg
+an evaluation is blocked on from the error.
+`discoverArgsFor entry system` calls the `discoverArgs` of an entry
+with the name and parent the entry holds and the system of the tool,
+and returns the program to run, or null.
 
 ### Telling names apart: `elide`
 

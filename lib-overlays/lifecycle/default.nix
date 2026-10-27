@@ -530,35 +530,63 @@ let
   # `type` and `class` are known before any args are, so the parent
   # records them, and the additions for the nearest children of the
   # class connect at the deferred configuration. `argsNeeded` declares
-  # the args it takes: an attrset whose leaves are made by `mkArg`, or
-  # a function of `{ name, parent, args }`, the args known so far,
-  # returning one, for args whose existence depends on other args or on
-  # what is declared beneath it. `discoverArgs`, optional, is a
-  # derivation whose program prints the args it can find as JSON on
-  # its standard output, an attrset of such derivations by system, for
-  # a program that runs on the system of the tool, or a function of
-  # `{ name, parent }` returning either (`discoverArgsFor`).
+  # the args it takes: a function of `{ name, parent, args }`, the args
+  # known so far, returning an attrset whose leaves are made by
+  # `mkArg`, since which args exist may depend on other args and on
+  # what is declared beneath it (`argsNeededFor`). `discoverArgs` is a
+  # function of `{ name, parent, system }` returning a derivation whose
+  # program prints the args it can find as JSON on its standard output,
+  # built for and run on `system`, the system of the tool that runs it;
+  # or null where there is no such program (`discoverArgsFor`). The
+  # default returns null.
   mkDeferredConfiguration =
     {
       type,
       class ? null,
       argsNeeded,
-      discoverArgs ? null,
+      discoverArgs ?
+        {
+          name,
+          parent,
+          system,
+        }:
+        null,
       configuration,
     }:
     let
-      expected = {
-        name = false;
-        parent = false;
-        args = false;
-      };
+      exactly =
+        names: f: builtins.isFunction f && builtins.functionArgs f == builtins.mapAttrs (_: _: false) names;
+      refuse =
+        field: pattern: what:
+        builtins.throw ''
+          caisson-core.mkDeferredConfiguration: the `${type}` deferred configuration's
+          `${field}` must be a function of exactly `${pattern}` returning ${what}.
+        '';
     in
-    if !(builtins.isFunction configuration && builtins.functionArgs configuration == expected) then
-      builtins.throw ''
-        caisson-core.mkDeferredConfiguration: the `${type}` deferred configuration's
-        `configuration` must be a function of exactly `{ name, parent, args }`
-        returning a manifest.
-      ''
+    if
+      !(exactly {
+        name = null;
+        parent = null;
+        args = null;
+      } configuration)
+    then
+      refuse "configuration" "{ name, parent, args }" "a manifest"
+    else if
+      !(exactly {
+        name = null;
+        parent = null;
+        args = null;
+      } argsNeeded)
+    then
+      refuse "argsNeeded" "{ name, parent, args }" "the args it takes"
+    else if
+      !(exactly {
+        name = null;
+        parent = null;
+        system = null;
+      } discoverArgs)
+    then
+      refuse "discoverArgs" "{ name, parent, system }" "a derivation or null"
     else
       {
         _type = "caisson-deferred-configuration";
@@ -667,30 +695,26 @@ let
 
   isArg = value: builtins.isAttrs value && (value._type or null) == "caisson-arg";
 
-  # The `argsNeeded` of a deferred child's entry, given the args known
-  # so far. A function `argsNeeded` is called with the name and parent
-  # the entry holds and those args, as the configuration is, since
-  # which args exist may depend on what is declared beneath it.
+  # The args a deferred child's entry takes, given the args known so
+  # far: its `argsNeeded` called with the name and parent the entry
+  # holds and those args, as the configuration is called.
   argsNeededFor =
     entry: known:
-    if builtins.isFunction entry.argsNeeded then
-      entry.argsNeeded {
-        inherit (entry) name parent;
-        args = known;
-      }
-    else
-      entry.argsNeeded;
+    entry.argsNeeded {
+      inherit (entry) name parent;
+      args = known;
+    };
 
-  # The `discoverArgs` of a deferred child's entry: null, a derivation,
-  # or derivations by system. A function `discoverArgs` is called with
-  # the name and parent the entry holds, since the program may depend
-  # on the package sets in force there.
+  # The discovery program of a deferred child's entry for `system`, the
+  # system of the tool that runs it: a derivation, or null. Its
+  # `discoverArgs` is called with the name and parent the entry holds,
+  # since the program may depend on the package sets in force there.
   discoverArgsFor =
-    entry:
-    if builtins.isFunction entry.discoverArgs then
-      entry.discoverArgs { inherit (entry) name parent; }
-    else
-      entry.discoverArgs;
+    entry: system:
+    entry.discoverArgs {
+      inherit (entry) name parent;
+      inherit system;
+    };
 
   # The name paths of the args an `argsNeeded` declares, each a list of
   # names.

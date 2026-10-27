@@ -2697,10 +2697,16 @@ let
           lib.caisson-core.mkDeferredConfiguration {
             type = "deployed";
             class = "stub";
-            argsNeeded = {
-              db.address = lib.caisson-core.mkArg { };
-              db.key = lib.caisson-core.mkArg { cacheable = true; };
-            };
+            argsNeeded =
+              {
+                name,
+                parent,
+                args,
+              }:
+              {
+                db.address = lib.caisson-core.mkArg { };
+                db.key = lib.caisson-core.mkArg { cacheable = true; };
+              };
             configuration =
               {
                 name,
@@ -2766,8 +2772,49 @@ let
       && throws (
         core.mkDeferredConfiguration {
           type = "bad";
-          argsNeeded = { };
+          argsNeeded =
+            {
+              name,
+              parent,
+              args,
+            }:
+            { };
           configuration = { name, parent }: null;
+        }
+      )
+      # `argsNeeded` and `discoverArgs` are functions of exactly their
+      # arguments too, so an attrset is refused where they are given.
+      && throws (
+        core.mkDeferredConfiguration {
+          type = "bad";
+          argsNeeded = { };
+          configuration =
+            {
+              name,
+              parent,
+              args,
+            }:
+            null;
+        }
+      )
+      && throws (
+        core.mkDeferredConfiguration {
+          type = "bad";
+          argsNeeded =
+            {
+              name,
+              parent,
+              args,
+            }:
+            { };
+          discoverArgs = { name, parent }: null;
+          configuration =
+            {
+              name,
+              parent,
+              args,
+            }:
+            null;
         }
       );
 
@@ -2794,7 +2841,7 @@ let
           ]
         ];
 
-    # A function `argsNeeded` is called with the name and parent the
+    # `argsNeeded` is called with the name and parent the
     # entry holds and the args known so far, so the args a deferred
     # child takes may depend on what it declares, and the manifest
     # records the arg names it computes for the args given.
@@ -2828,14 +2875,26 @@ let
           name = "member";
           parent = composed.caisson-core.libManifest;
         } child;
-        # A function `discoverArgs` sees the same name and parent.
+        # `discoverArgs` sees the same name and parent, and the system of
+        # the tool; the default gives no program.
         discovering = composed.caisson-core.deferChild {
           name = "member";
           parent = composed.caisson-core.libManifest;
-        } (child // { discoverArgs = { name, parent }: { x86_64-linux = "${name} under ${parent.type}"; }; });
+        } (
+          composed.caisson-core.mkDeferredConfiguration {
+            inherit (child) type argsNeeded configuration;
+            discoverArgs =
+              {
+                name,
+                parent,
+                system,
+              }:
+              "${name} under ${parent.type} for ${system}";
+          }
+        );
       in
-      core.discoverArgsFor discovering == { x86_64-linux = "member under lib"; }
-      && core.discoverArgsFor entry == null
+      core.discoverArgsFor discovering "x86_64-linux" == "member under lib for x86_64-linux"
+      && core.discoverArgsFor entry "x86_64-linux" == null
       &&
       core.argNamesOf (core.argsNeededFor entry { }) == [
         [
@@ -2874,7 +2933,15 @@ let
             (
               composed.caisson-core.mkDeferredConfiguration {
                 type = "stub";
-                argsNeeded.x = composed.caisson-core.mkArg { };
+                argsNeeded =
+                  {
+                    name,
+                    parent,
+                    args,
+                  }:
+                  {
+                    x = composed.caisson-core.mkArg { };
+                  };
                 configuration =
                   {
                     name,
