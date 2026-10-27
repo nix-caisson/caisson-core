@@ -2823,6 +2823,15 @@ let
       && given.value.config.extra == "kept"
       && (finalize { first = 2; }).outputs.marker == "none"
       && throws (finalize { first = 1; }).outputs.marker
+      # A value that is not an attribute set, given where `argsNeeded`
+      # declares args beneath it, fails with an error that names its
+      # path, which `builtins.tryEval` catches. The error of `//` on a
+      # string would abort the whole suite instead.
+      && throws (finalize {
+        first = 1;
+        more = "two";
+      }).outputs.marker
+      && throws (finalize "all").outputs.marker
       && given.discoverArgs { system = "x86_64-linux"; } == "member under lib for x86_64-linux";
 
     # What a level gives its direct children (`forDirectChildren`)

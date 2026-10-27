@@ -644,21 +644,29 @@ let
   # evaluation reads `needed` from the manifest it returns, so each
   # level of `needed` is read only when the args at that level are,
   # and the names at a level must not depend on the args beneath it.
+  # Where `needed` declares args beneath a name, the value given there
+  # must be an attribute set, or the args there fail with an error that
+  # names the path.
   fillArgs =
     let
       walk =
         path: needed: given:
-        given
-        // builtins.mapAttrs (
-          name: value:
-          if isArg value then
-            given.${name}
-              or (builtins.throw "caisson-deferred: needs ${builtins.concatStringsSep "." (path ++ [ name ])}")
-          else if builtins.isAttrs value then
-            walk (path ++ [ name ]) value (given.${name} or { })
-          else
-            value
-        ) needed;
+        if !(builtins.isAttrs given) then
+          builtins.throw "caisson-deferred: the args given at ${
+            if path == [ ] then "the top" else builtins.concatStringsSep "." path
+          } are a ${builtins.typeOf given}, where `argsNeeded` declares an attribute set of args."
+        else
+          given
+          // builtins.mapAttrs (
+            name: value:
+            if isArg value then
+              given.${name}
+                or (builtins.throw "caisson-deferred: needs ${builtins.concatStringsSep "." (path ++ [ name ])}")
+            else if builtins.isAttrs value then
+              walk (path ++ [ name ]) value (given.${name} or { })
+            else
+              value
+          ) needed;
     in
     walk [ ];
 
