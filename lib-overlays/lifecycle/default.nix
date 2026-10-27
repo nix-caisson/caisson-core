@@ -529,72 +529,42 @@ let
   # `{ name, parent }`, so neither can be finalized as the other.
   # `type` and `class` are known before any args are, so the parent
   # records them, and the additions for the nearest children of the
-  # class connect at the deferred configuration. `argsNeeded` declares
-  # the args it takes: a function of `{ name, parent, args }`, the args
-  # known so far, returning an attrset whose leaves are made by
-  # `mkArg`, since which args exist may depend on other args and on
-  # what is declared beneath it (`argsNeededFor`). `discoverArgs` is a
-  # function of `{ name, parent, system }` returning a derivation whose
-  # program prints the args it can find as JSON on its standard output,
-  # built for and run on `system`, the system of the tool that runs it;
-  # or null where there is no such program (`discoverArgsFor`). The
-  # default returns null.
+  # class connect at the deferred configuration. `record` is plain data
+  # the entry carries beside them, as `record` of `mkConfiguration` is
+  # data a manifest carries, such as how the entry is published.
+  #
+  # The manifest the configuration returns says which args it takes
+  # and how to find them, in `argsNeeded` and `discoverArgs`, as every
+  # manifest does (`mkConfiguration`).
   mkDeferredConfiguration =
     {
       type,
       class ? null,
-      argsNeeded,
-      discoverArgs ?
-        {
-          name,
-          parent,
-          system,
-        }:
-        null,
+      record ? { },
       configuration,
     }:
-    let
-      exactly =
-        names: f: builtins.isFunction f && builtins.functionArgs f == builtins.mapAttrs (_: _: false) names;
-      refuse =
-        field: pattern: what:
-        builtins.throw ''
-          caisson-core.mkDeferredConfiguration: the `${type}` deferred configuration's
-          `${field}` must be a function of exactly `${pattern}` returning ${what}.
-        '';
-    in
     if
-      !(exactly {
-        name = null;
-        parent = null;
-        args = null;
-      } configuration)
+      !(
+        builtins.isFunction configuration
+        && builtins.functionArgs configuration == {
+          name = false;
+          parent = false;
+          args = false;
+        }
+      )
     then
-      refuse "configuration" "{ name, parent, args }" "a manifest"
-    else if
-      !(exactly {
-        name = null;
-        parent = null;
-        args = null;
-      } argsNeeded)
-    then
-      refuse "argsNeeded" "{ name, parent, args }" "the args it takes"
-    else if
-      !(exactly {
-        name = null;
-        parent = null;
-        system = null;
-      } discoverArgs)
-    then
-      refuse "discoverArgs" "{ name, parent, system }" "a derivation or null"
+      builtins.throw ''
+        caisson-core.mkDeferredConfiguration: the `${type}` deferred configuration's
+        `configuration` must be a function of exactly `{ name, parent, args }`
+        returning a manifest.
+      ''
     else
       {
         _type = "caisson-deferred-configuration";
         inherit
           type
           class
-          argsNeeded
-          discoverArgs
+          record
           configuration
           ;
       };
@@ -602,12 +572,22 @@ let
   isDeferredConfiguration =
     value: builtins.isAttrs value && (value._type or null) == "caisson-deferred-configuration";
 
-  # The entry a parent holds under `children` for a deferred child:
-  # its name, type and class, the parent it is finalized against (the
-  # childless manifest of the parent), `argsNeeded`, `discoverArgs`,
-  # and `finalize`, which takes `{ args, argsSource ? null }` and
-  # returns the deferred child's manifest (`finalizeDeferredChild`).
-  # Nothing in it is evaluated at flake time beyond these.
+  # The entry a parent holds under `children` for a deferred child, in
+  # place of a manifest: the `record` of the deferred configuration,
+  # and its name, type and class, the parent it is finalized against
+  # (the childless manifest of the parent), and `finalize`. Nothing in
+  # it is evaluated at flake time.
+  #
+  # `finalize { args, argsSource }` calls the deferred configuration
+  # with the name, the parent and the args, and returns its manifest
+  # with `argsSource` added. `argsSource` is a function from the path
+  # of an arg, a list of names, to a sentence saying where its value
+  # came from. Before the call, the args are filled against the
+  # `argsNeeded` of the manifest the call returns (`fillArgs`), so an
+  # arg the caller did not give fails when it is read, and names
+  # itself. Every tool that finalizes a deferred configuration calls
+  # this function, as does a parent that gives its deferred children
+  # their args.
   isDeferred = value: builtins.isAttrs value && (value._type or null) == "caisson-deferred";
 
   deferChild =
@@ -620,62 +600,24 @@ let
     if !(isDeferredConfiguration child) then
       builtins.throw "${what} is declared with a ${builtins.typeOf child} where caisson-core.deferChild expects a deferred configuration (`mkDeferredConfiguration`)."
     else
-      {
+      child.record
+      // {
         _type = "caisson-deferred";
         inherit name parent;
-        inherit (child)
-          type
-          class
-          argsNeeded
-          discoverArgs
-          ;
+        inherit (child) type class;
         finalize =
-          {
-            args,
-            argsSource ? null,
-          }:
-          finalizeDeferredChild {
-            inherit
-              name
-              parent
-              args
-              argsSource
-              what
-              ;
-          } child;
+          { args, argsSource }:
+          let
+            manifest = child.configuration {
+              inherit name parent;
+              args = fillArgs manifest.argsNeeded args;
+            };
+          in
+          if isManifest manifest then
+            manifest // { inherit argsSource; }
+          else
+            builtins.throw "The deferred configuration ${what} did not return a manifest.";
       };
-
-  # Finalize a deferred configuration with its args: call it with the
-  # name it is declared under, its parent and the args, and record on
-  # the manifest which args it was given and where they came from
-  # (`deferred`), never their values. `argsSource` is free text a tool
-  # supplies, such as "discovered 2026-10-26T14:02Z by nixops4 state
-  # dump"; null when nobody says.
-  finalizeDeferredChild =
-    {
-      name,
-      parent,
-      args,
-      argsSource ? null,
-      what ? "`${builtins.toString name}`",
-    }:
-    child:
-    if !(isDeferredConfiguration child) then
-      builtins.throw "${what} is not a deferred configuration (`mkDeferredConfiguration`), so caisson-core.finalizeDeferredChild cannot finalize it."
-    else
-      let
-        result = child.configuration { inherit name parent args; };
-      in
-      if isManifest result then
-        result
-        // {
-          deferred = {
-            argNames = argNamesOf (argsNeededFor (child // { inherit name parent; }) args);
-            source = argsSource;
-          };
-        }
-      else
-        builtins.throw "The deferred configuration ${what} did not return a manifest.";
 
   # One arg a deferred configuration takes, a leaf of `argsNeeded`.
   # `cacheable` says whether a tool may keep a value it discovered in a
@@ -695,61 +637,30 @@ let
 
   isArg = value: builtins.isAttrs value && (value._type or null) == "caisson-arg";
 
-  # The args a deferred child's entry takes, given the args known so
-  # far: its `argsNeeded` called with the name and parent the entry
-  # holds and those args, as the configuration is called.
-  argsNeededFor =
-    entry: known:
-    entry.argsNeeded {
-      inherit (entry) name parent;
-      args = known;
-    };
-
-  # The discovery program of a deferred child's entry for `system`, the
-  # system of the tool that runs it: a derivation, or null. Its
-  # `discoverArgs` is called with the name and parent the entry holds,
-  # since the program may depend on the package sets in force there.
-  discoverArgsFor =
-    entry: system:
-    entry.discoverArgs {
-      inherit (entry) name parent;
-      inherit system;
-    };
-
-  # The name paths of the args an `argsNeeded` declares, each a list of
-  # names.
-  argNamesOf =
-    needed:
+  # The args a deferred configuration is called with: `given`, with
+  # each arg `needed` declares that `given` lacks replaced by an error
+  # with the fixed text `caisson-deferred: needs <path>`, which tools
+  # read. A given value is passed on without being evaluated. The
+  # evaluation reads `needed` from the manifest it returns, so each
+  # level of `needed` is read only when the args at that level are,
+  # and the names at a level must not depend on the args beneath it.
+  fillArgs =
     let
       walk =
-        path: value:
-        if isArg value then
-          [ path ]
-        else if builtins.isAttrs value then
-          builtins.concatMap (name: walk (path ++ [ name ]) value.${name}) (builtins.attrNames value)
-        else
-          [ ];
+        path: needed: given:
+        given
+        // builtins.mapAttrs (
+          name: value:
+          if isArg value then
+            given.${name}
+              or (builtins.throw "caisson-deferred: needs ${builtins.concatStringsSep "." (path ++ [ name ])}")
+          else if builtins.isAttrs value then
+            walk (path ++ [ name ]) value (given.${name} or { })
+          else
+            value
+        ) needed;
     in
-    walk [ ] needed;
-
-  # Stand-ins for the args an `argsNeeded` declares: the same shape,
-  # each leaf an error naming the arg, with the fixed marker
-  # `caisson-deferred: needs <path>`. A tool that evaluates a deferred
-  # configuration ahead of time passes them for the args it does not
-  # have and reads the marker from the error text.
-  standInsFor =
-    needed:
-    let
-      walk =
-        path: value:
-        if isArg value then
-          builtins.throw "caisson-deferred: needs ${builtins.concatStringsSep "." path}"
-        else if builtins.isAttrs value then
-          builtins.mapAttrs (name: walk (path ++ [ name ])) value
-        else
-          value;
-    in
-    walk [ ] needed;
+    walk [ ];
 
   # The evaluations of a configuration evaluated at a system: manifests
   # by system.
@@ -1149,9 +1060,11 @@ let
     "crossChildFull"
     "crossChildLevel"
     "crossChildLevelPath"
+    "argsNeeded"
+    "argsSource"
     "defaultModuleImports"
-    "deferred"
     "directParent"
+    "discoverArgs"
     "forChildren"
     "forDirectChildren"
     "forNearestChildren"
@@ -1221,6 +1134,18 @@ let
   # the three may hold `unsafeCrossChildReferences`, by class a
   # boolean: the configurations of the class it reaches read the full
   # evaluation of this one as `crossChildLevel`.
+  #
+  # `evaluate` may also return `argsNeeded` and `discoverArgs`, for a
+  # deferred configuration (`mkDeferredConfiguration`), which the
+  # manifest carries under those names. `argsNeeded` is the args the
+  # evaluation takes, an attrset whose leaves are made by `mkArg`;
+  # empty for a configuration that takes none. Its names at each level
+  # must not depend on the args beneath that level (`fillArgs`).
+  # `discoverArgs` is a function of `{ system }` returning a derivation
+  # whose program prints, as JSON on its standard output, the args it
+  # finds, built for and run on `system`, the system of the tool that
+  # runs it; or null where there is no such program, as the default
+  # returns.
   #
   # `evaluate` may also return `events`, the events the evaluation
   # records, in the order they happened: each with its `operation`
@@ -1401,6 +1326,8 @@ let
                   inherit childless children;
                   value = evaluated.value;
                   outputs = evaluated.outputs or { };
+                  argsNeeded = evaluated.argsNeeded or { };
+                  discoverArgs = evaluated.discoverArgs or ({ system }: null);
                   forChildren = {
                     extraDefaultModuleImports = (evaluated.forChildren or { }).extraDefaultModuleImports or { };
                     defaultPkgs = (evaluated.forChildren or { }).defaultPkgs or null;
@@ -1595,36 +1522,6 @@ let
         builtins.concatMap render (builtins.genList (depth: depth) (builtins.length path));
     in
     builtins.map segmentsOf indices;
-
-  # Finalize a deferred configuration as a top with its args: a
-  # deferred top keeps the composition of the lib it is finalized
-  # under, as a top does, rather than inheriting the composition of a
-  # parent. Its name is the name the composition declares on mkLib,
-  # and its parent is the lib's manifest.
-  finalizeDeferredTopFor =
-    final:
-    {
-      args,
-      argsSource ? null,
-    }:
-    configuration:
-    let
-      libManifest = final.caisson-core.libManifest;
-    in
-    if libManifest == null then
-      builtins.throw ''
-        caisson-core.finalizeDeferredTop finalizes a deferred configuration under a
-        composition's manifest, but this library carries none at
-        `caisson-core.libManifest`. Compose the library with
-        caisson-core.mkLib, which captures a manifest.
-      ''
-    else
-      finalizeDeferredChild {
-        name = libManifest.name or null;
-        parent = libManifest;
-        inherit args argsSource;
-        what = "The deferred top configuration";
-      } configuration;
 
   # Finalize the configuration a top ends with: a top has no parent
   # that declares it under an attribute, so it takes the name the
@@ -2828,16 +2725,12 @@ in
   overlay = final: prev: {
     caisson-core = (prev.caisson-core or { }) // {
       inherit
-        argNamesOf
-        argsNeededFor
-        discoverArgsFor
         coreEntries
         deferChild
         definers
         ecosystemSrc
         elide
         finalizeChild
-        finalizeDeferredChild
         importApply
         isArg
         isDeferred
@@ -2850,11 +2743,9 @@ in
         mkLib
         namePathOf
         pkgOverlaysFor
-        standInsFor
         ;
       mkConfiguration = mkConfigurationFor final;
       finalizeTop = finalizeTopFor final;
-      finalizeDeferredTop = finalizeDeferredTopFor final;
       mkPkgOverlay = mkPkgOverlayFor {
         sources = closure-inputs;
         finalLib = final;

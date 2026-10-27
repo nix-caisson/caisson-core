@@ -324,7 +324,7 @@ Under `caisson-core`:
 | Package overlays | `pkgOverlaysFor` |
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `namePathOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide`, `isManifest` |
-| Deferred configurations | `mkDeferredConfiguration`, `deferChild`, `finalizeDeferredChild`, `finalizeDeferredTop`, `isDeferred`, `isDeferredConfiguration`, `mkArg`, `isArg`, `argsNeededFor`, `discoverArgsFor`, `argNamesOf`, `standInsFor` |
+| Deferred configurations | `mkDeferredConfiguration`, `deferChild`, `isDeferred`, `isDeferredConfiguration`, `mkArg`, `isArg` |
 | Sources | `ecosystemSrc` |
 | Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
 | Attribute sets | `attrsets.genAttrs`, `attrsets.filterAttrs` |
@@ -739,51 +739,54 @@ children.
 
 ### Deferred configurations
 
-A deferred configuration is a configuration whose evaluation waits
-for args: values supplied after the flake is evaluated, such as the
-outputs of resources a deployment tool applies.
+A deferred configuration is a function of `{ name, parent, args }`,
+where a configuration is a function of `{ name, parent }`. Its args
+are values a deployment tool supplies after the flake is evaluated,
+such as the outputs of the resources it applies, and they reach the
+configuration only through `args`.
 
-`mkDeferredConfiguration { type; class ? null; argsNeeded; discoverArgs ? ({ name, parent, system }: null); configuration; }`
-makes one:
+`mkDeferredConfiguration { type; class ? null; record ? { }; configuration; }`
+makes one. `type` and `class` are the integration and the module
+class, known before any args are. `record` is plain data the entry
+carries, such as how the entry is published. `configuration` is
+refused unless it is a function of exactly `{ name, parent, args }`
+returning a manifest.
 
-| Argument | Meaning |
-| --- | --- |
-| `type`, `class` | the integration and module class, known before any args are |
-| `argsNeeded` | a function of `{ name, parent, args }`, with the args known so far, returning the args it takes: an attrset whose leaves are made by `mkArg { cacheable ? false; type ? null; description ? null; }` |
-| `discoverArgs` | a function of `{ name, parent, system }` returning a derivation whose program, built for and run on `system`, prints the args it can find as JSON on its standard output; or null. The default returns null |
-| `configuration` | a function of exactly `{ name, parent, args }` returning a manifest |
+A parent cannot call a deferred configuration, because it has no args
+to give. It holds an entry under `children` instead, which
+`deferChild { name; parent; } child` makes. The entry holds the
+`record`, the name, type, class and parent, and the function
+`finalize { args; argsSource; }`, which calls the configuration and
+returns its manifest. Nothing in the entry is evaluated at flake time.
+The parent's `history` and `inputs` leave the entry out.
 
-Each of the three functions is refused unless it takes exactly the
-arguments named here, so a value meant for one cannot be given as
-another.
+Every manifest says which args its evaluation takes, in `argsNeeded`:
+an attrset whose leaves are made by
+`mkArg { cacheable ? false; type ? null; description ? null; }`, and
+empty for a configuration that takes none. `cacheable` says whether a
+tool may keep a value it found in a cache only its user can read.
+`finalize` fills the args against the `argsNeeded` of the manifest it
+returns: a given arg is passed on unevaluated, and an arg the caller
+did not give throws `caisson-deferred: needs <path>` when it is read.
+Tools read that text to learn which arg an evaluation is blocked on.
+Since the evaluation reads `argsNeeded` from its own result, the names
+at each level of `argsNeeded` must not depend on the args beneath that
+level.
 
-A parent holds a deferred child under `children` as an entry that
-`deferChild { name; parent; } child` makes: its name, type, class,
-parent, `argsNeeded` and `discoverArgs`, and `finalize { args;
-argsSource ? null; }`, which returns its manifest. Nothing in it is
-evaluated at flake time. The parent's `history` and `inputs` leave the
-entry out, and nothing beneath it is evaluated until it is finalized.
+The manifest `finalize` returns also carries `argsSource`, a function
+from the path of an arg, a list of names, to a sentence saying where
+its value came from. It never carries the values.
 
-`finalizeDeferredChild { name; parent; args; argsSource ? null; } child`
-finalizes a deferred configuration against its parent, as
-`finalizeChild` finalizes a configuration, so it inherits what a child
-inherits and the nearest additions for its class connect at it. Its
-manifest records `deferred = { argNames; source; }`: the name paths of
-the args and where they came from, never their values.
-`finalizeDeferredTop { args; argsSource ? null; } configuration`
-finalizes a deferred configuration as a top, against the manifest of
-the lib, as `finalizeTop` does.
+Every manifest also carries `discoverArgs`, a function of
+`{ system }` returning a derivation whose program, built for and run
+on `system`, prints the args it finds as JSON on its standard output;
+or null, as it is for a configuration with no such program.
 
-`argsNeededFor entry known` calls the `argsNeeded` of an entry with the
-name and parent the entry holds and the args known so far, and
-`argNamesOf` lists the name paths of what it returns.
-`standInsFor needed` returns stand-ins of the same shape, each of which
-throws `caisson-deferred: needs <path>` when read, for a tool that
-evaluates a deferred configuration ahead of time and reads which arg
-an evaluation is blocked on from the error.
-`discoverArgsFor entry system` calls the `discoverArgs` of an entry
-with the name and parent the entry holds and the system of the tool,
-and returns the program to run, or null.
+A parent that has args of its own, because it was finalized, gives
+its deferred children their part of them by calling `finalize` on
+their entries. It then holds the manifests `finalize` returns under
+`children`, so a tool that walks the tree finds them as it finds any
+other child.
 
 ### Telling names apart: `elide`
 

@@ -56,6 +56,8 @@ let
         seenLib = lib;
       };
       outputs.marker = config.marker or null;
+      argsNeeded = config.argsNeeded or { };
+      discoverArgs = config.discoverArgs or ({ system }: null);
       children = builtins.mapAttrs (
         integration:
         builtins.mapAttrs (
@@ -2670,13 +2672,13 @@ let
       ];
 
     # A deferred child is held under its integration as an entry: its
-    # name, type, class, `argsNeeded` and `discoverArgs`, nothing
-    # evaluated. The parent's full manifest, its history and its
-    # inputs evaluate without it. `finalize` with args returns its
-    # manifest, finalized against the parent's childless view, so it
-    # inherits what a child inherits and the nearest additions for its
-    # class connect at it; the manifest records the names of the args
-    # and their source. Stand-ins name the arg they stand for.
+    # name, type, class and `finalize`, nothing evaluated. The parent's
+    # full manifest, its history and its inputs evaluate without it.
+    # `finalize` with args returns its manifest, finalized against the
+    # parent's childless view, so it inherits what a child inherits and
+    # the nearest additions for its class connect at it. The manifest
+    # carries the args it takes and where their values came from, and
+    # an arg the caller did not give fails when it is read.
     lifecycleDeferredChildren =
       let
         composed = core.mkLib {
@@ -2697,16 +2699,7 @@ let
           lib.caisson-core.mkDeferredConfiguration {
             type = "deployed";
             class = "stub";
-            argsNeeded =
-              {
-                name,
-                parent,
-                args,
-              }:
-              {
-                db.address = lib.caisson-core.mkArg { };
-                db.key = lib.caisson-core.mkArg { cacheable = true; };
-              };
+            record.published = "as web";
             configuration =
               {
                 name,
@@ -2715,6 +2708,11 @@ let
               }:
               stubIntegrationWith { class = "stub"; } "deployed" lib (_lib: {
                 marker = args.db.address;
+                key = args.db.key;
+                argsNeeded = {
+                  db.address = lib.caisson-core.mkArg { };
+                  db.key = lib.caisson-core.mkArg { cacheable = true; };
+                };
               }) { inherit name parent; };
           };
         top = composed.caisson-core.finalizeTop (
@@ -2731,14 +2729,19 @@ let
             address = "10.0.0.5";
             key = "k";
           };
-          argsSource = "given";
+          argsSource = path: "given ${builtins.concatStringsSep "." path}";
         };
-        stood = core.standInsFor (core.argsNeededFor entry { });
-        caught = builtins.tryEval stood.db.address;
+        # Without `db.key`, the evaluation reads the args it was given
+        # and fails where it reads the one it was not.
+        partial = entry.finalize {
+          args.db.address = "10.0.0.6";
+          argsSource = _: "given";
+        };
       in
       core.isDeferred entry
       && entry.type == "deployed"
       && entry.class == "stub"
+      && entry.published == "as web"
       &&
         builtins.attrNames top.children == [
           "deployed"
@@ -2753,209 +2756,74 @@ let
           "for all"
           "nearest"
         ]
-      &&
-        finalized.deferred == {
-          argNames = [
-            [
-              "db"
-              "address"
-            ]
-            [
-              "db"
-              "key"
-            ]
-          ];
-          source = "given";
-        }
-      && !caught.success
+      && finalized.argsNeeded.db.key.cacheable
+      && finalized.argsSource [
+        "db"
+        "key"
+      ] == "given db.key"
+      && finalized.discoverArgs { system = "x86_64-linux"; } == null
+      && partial.outputs.marker == "10.0.0.6"
+      && throws partial.value.config.key
       && throws (top.children.stub.plain.parent.children.deployed or (throw "absent"))
       && throws (
         core.mkDeferredConfiguration {
           type = "bad";
-          argsNeeded =
-            {
-              name,
-              parent,
-              args,
-            }:
-            { };
           configuration = { name, parent }: null;
-        }
-      )
-      # `argsNeeded` and `discoverArgs` are functions of exactly their
-      # arguments too, so an attrset is refused where they are given.
-      && throws (
-        core.mkDeferredConfiguration {
-          type = "bad";
-          argsNeeded = { };
-          configuration =
-            {
-              name,
-              parent,
-              args,
-            }:
-            null;
-        }
-      )
-      && throws (
-        core.mkDeferredConfiguration {
-          type = "bad";
-          argsNeeded =
-            {
-              name,
-              parent,
-              args,
-            }:
-            { };
-          discoverArgs = { name, parent }: null;
-          configuration =
-            {
-              name,
-              parent,
-              args,
-            }:
-            null;
         }
       );
 
-    # A stand-in throws when read, and the args an `argsNeeded`
-    # declares are named by their paths. The message a stand-in throws
-    # carries the marker with that path; `tryEval` hides messages, so
-    # this test checks the throw and the path, and the marker is read
-    # where tools read it, from the error text of `nix eval`.
-    lifecycleStandInsNameTheirArg =
-      let
-        needed = {
-          root.db.outputs.address = core.mkArg { };
-        };
-        stood = core.standInsFor needed;
-      in
-      !(builtins.tryEval stood.root.db.outputs.address).success
-      &&
-        core.argNamesOf needed == [
-          [
-            "root"
-            "db"
-            "outputs"
-            "address"
-          ]
-        ];
-
-    # `argsNeeded` is called with the name and parent the
-    # entry holds and the args known so far, so the args a deferred
-    # child takes may depend on what it declares, and the manifest
-    # records the arg names it computes for the args given.
-    lifecycleArgsNeededSeesNameAndParent =
+    # The args a deferred configuration takes may depend on the args
+    # above them: here `more` holds `second` only when `first` is 1.
+    # The evaluation reads `argsNeeded` from the manifest it returns,
+    # so filling `more` waits until `more` is read. A given arg that
+    # `argsNeeded` does not declare is passed on. `discoverArgs` is read
+    # from the manifest as well, for the system of the tool.
+    lifecycleArgsFillFromTheManifest =
       let
         composed = core.mkLib {
           sources = { };
           name = "probe-project";
-        };
-        child = composed.caisson-core.mkDeferredConfiguration {
-          type = "stub";
-          argsNeeded =
-            {
-              name,
-              parent,
-              args,
-            }:
-            {
-              ${name}.${parent.type} = composed.caisson-core.mkArg { };
-            }
-            // (if args ? first then { second = composed.caisson-core.mkArg { }; } else { });
-          configuration =
-            {
-              name,
-              parent,
-              args,
-            }:
-            stubIntegration "stub" composed (_lib: { }) { inherit name parent; };
         };
         entry = composed.caisson-core.deferChild {
           name = "member";
           parent = composed.caisson-core.libManifest;
-        } child;
-        # `discoverArgs` sees the same name and parent, and the system of
-        # the tool; the default gives no program.
-        discovering = composed.caisson-core.deferChild {
-          name = "member";
-          parent = composed.caisson-core.libManifest;
         } (
           composed.caisson-core.mkDeferredConfiguration {
-            inherit (child) type argsNeeded configuration;
-            discoverArgs =
+            type = "stub";
+            configuration =
               {
                 name,
                 parent,
-                system,
+                args,
               }:
-              "${name} under ${parent.type} for ${system}";
+              stubIntegration "stub" composed (_lib: {
+                marker = args.more.second or "none";
+                extra = args.extra or null;
+                argsNeeded = {
+                  first = composed.caisson-core.mkArg { };
+                  more = if args.first == 1 then { second = composed.caisson-core.mkArg { }; } else { };
+                };
+                discoverArgs = { system }: "${name} under ${parent.type} for ${system}";
+              }) { inherit name parent; };
           }
         );
-      in
-      core.discoverArgsFor discovering "x86_64-linux" == "member under lib for x86_64-linux"
-      && core.discoverArgsFor entry "x86_64-linux" == null
-      &&
-      core.argNamesOf (core.argsNeededFor entry { }) == [
-        [
-          "member"
-          "lib"
-        ]
-      ]
-      && core.argNamesOf (core.argsNeededFor entry { first = 1; }) == [
-        [
-          "member"
-          "lib"
-        ]
-        [ "second" ]
-      ]
-      && (entry.finalize { args.first = 1; }).deferred.argNames == [
-        [
-          "member"
-          "lib"
-        ]
-        [ "second" ]
-      ];
-
-    # A deferred top is finalized under the lib's manifest with the
-    # name the composition declares, as a top is, and records its args.
-    lifecycleDeferredTop =
-      let
-        composed = core.mkLib {
-          sources = { };
-          name = "probe-project";
+        finalize =
+          args:
+          entry.finalize {
+            inherit args;
+            argsSource = _: "given";
+          };
+        given = finalize {
+          first = 1;
+          more.second = "two";
+          extra = "kept";
         };
-        top =
-          composed.caisson-core.finalizeDeferredTop
-            {
-              args.x = "given x";
-            }
-            (
-              composed.caisson-core.mkDeferredConfiguration {
-                type = "stub";
-                argsNeeded =
-                  {
-                    name,
-                    parent,
-                    args,
-                  }:
-                  {
-                    x = composed.caisson-core.mkArg { };
-                  };
-                configuration =
-                  {
-                    name,
-                    parent,
-                    args,
-                  }:
-                  stubIntegration "stub" composed (_lib: { marker = args.x; }) { inherit name parent; };
-              }
-            );
       in
-      top.name == "probe-project"
-      && top.parent.type == "lib"
-      && top.outputs.marker == "given x"
-      && top.deferred.argNames == [ [ "x" ] ];
+      given.outputs.marker == "two"
+      && given.value.config.extra == "kept"
+      && (finalize { first = 2; }).outputs.marker == "none"
+      && throws (finalize { first = 1; }).outputs.marker
+      && given.discoverArgs { system = "x86_64-linux"; } == "member under lib for x86_64-linux";
 
     # What a level gives its direct children (`forDirectChildren`)
     # reaches the children of the class directly beneath it, a child
