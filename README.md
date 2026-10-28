@@ -117,7 +117,7 @@ modules over the empty seed, and injects the `caisson-core` namespace
 ```nix
 core.mkLib {
   # The tree's pinned sources, closed over by registered overlays and
-  # modules as `closure-inputs`, and the tree's root (see Sources and
+  # modules as `closure-sources`, and the tree's root (see Sources and
   # the root). Only `sources` is required.
   sources = { };
   root = null;
@@ -357,10 +357,10 @@ A registered file takes a closure attribute set as its first argument
 list:
 
 - an overlay file takes
-  `{ closure-inputs, closure-lib, mkLibOverlay, mkModule, ... }`;
-- a module file takes `{ closure-inputs, closure-lib, mkModule, ... }`.
+  `{ closure-sources, closure-lib, mkLibOverlay, mkModule, ... }`;
+- a module file takes `{ closure-sources, closure-lib, mkModule, ... }`.
 
-`closure-inputs` is the pinned sources of the composition.
+`closure-sources` is the pinned sources of the composition.
 `closure-lib` is the composed library of the composition that
 registered the file, bound lazily. So the functions of an overlay,
 and a module, reach the registry of that composition under
@@ -407,7 +407,7 @@ can keep the entries the composition registered:
 
 The package overlay registry holds package overlays in the shape of a
 lib overlay entry. A file handed to `mkPkgOverlay` takes the closure
-`{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and returns
+`{ closure-sources, closure-lib, mkPkgOverlay, ... }` and returns
 `{ imports ? [ ], overlay }`, where `overlay` is an overlay of a package set (`final: prev:`).
 
 Every registered entry carries:

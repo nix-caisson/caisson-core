@@ -21,7 +21,7 @@
 # and `coreEntries`, the function that makes these entries for a
 # composition. It uses builtins only, on purpose.
 {
-  closure-inputs,
+  closure-sources,
   compose,
   coreEntries,
   # The default source per ecosystem that the composition these
@@ -44,7 +44,7 @@ let
     builtins.import ../resolve/resolve.nix {
       inherit name;
       defaults = defaultEcosystemSrc;
-      sources = closure-inputs;
+      sources = closure-sources;
     };
 
   # Overlay registries. A library and a package set are built the same
@@ -247,7 +247,7 @@ let
 
   # Build a composition-bound mkLibOverlay: everything passed to it
   # takes the closure attrset,
-  # `{ closure-inputs, closure-lib, mkLibOverlay, ... }:`, as its
+  # `{ closure-sources, closure-lib, mkLibOverlay, ... }:`, as its
   # first arg list, and returns an `{ imports ? [ ], overlay }`
   # attrset.  Already-built overlays (e.g. another flake's exported
   # libOverlays) are registered directly rather than wrapped.
@@ -279,7 +279,7 @@ let
               if builtins.isFunction reified then
                 reified (
                   {
-                    closure-inputs = sources;
+                    closure-sources = sources;
                     inherit mkLibOverlay;
                   }
                   // extraOverlayClosure
@@ -287,7 +287,7 @@ let
               else
                 builtins.throw ''
                   ${provenance}mkLibOverlay expects a function taking the closure attrset
-                  (`{ closure-inputs, closure-lib, mkLibOverlay, ... }:`) as its first arg
+                  (`{ closure-sources, closure-lib, mkLibOverlay, ... }:`) as its first arg
                   list, but got a ${builtins.typeOf reified}. Register already-built overlays
                   directly instead of wrapping them in mkLibOverlay.
                 '';
@@ -314,7 +314,7 @@ let
 
   # Build a composition-bound mkPkgOverlay, the package overlay
   # constructor: everything passed to it takes the closure attrset
-  # `{ closure-inputs, closure-lib, mkPkgOverlay, ... }:` as its first
+  # `{ closure-sources, closure-lib, mkPkgOverlay, ... }:` as its first
   # arg list and returns `{ imports ? [ ], overlay }`, the lib overlay
   # entry's shape, with `overlay = final: prev: ...` an overlay of a
   # package set.
@@ -345,14 +345,14 @@ let
           applied =
             if builtins.isFunction reified then
               reified {
-                closure-inputs = sources;
+                closure-sources = sources;
                 closure-lib = finalLib;
                 inherit mkPkgOverlay;
               }
             else
               builtins.throw ''
                 ${provenance}mkPkgOverlay expects a function taking the closure attrset
-                (`{ closure-inputs, closure-lib, mkPkgOverlay, ... }:`) as its first arg
+                (`{ closure-sources, closure-lib, mkPkgOverlay, ... }:`) as its first arg
                 list, but got a ${builtins.typeOf reified}. Register already-built package
                 overlays through `projects` instead of wrapping them in mkPkgOverlay.
               '';
@@ -1640,14 +1640,14 @@ let
           mkModule = mkModuleClass moduleClass;
           closureArgs = {
             inherit mkModule;
-            closure-inputs = sources;
+            closure-sources = sources;
             closure-lib = finalLib;
           };
         in
         freeformModule:
         (
           # Everything passed to mkModule takes the closure attrset as its first
-          # arg list: `{ closure-inputs, closure-lib, mkModule, ... }: <module>`.
+          # arg list: `{ closure-sources, closure-lib, mkModule, ... }: <module>`.
           let
             applyClosure =
               m:
@@ -1656,7 +1656,7 @@ let
               else
                 builtins.throw ''
                   mkModule (class `${moduleClass}`) expects a module function taking the
-                  closure attrset (`{ closure-inputs, closure-lib, mkModule, ... }:`) as
+                  closure attrset (`{ closure-sources, closure-lib, mkModule, ... }:`) as
                   its first arg list, but got a ${builtins.typeOf m}.
                 '';
             requiresImport = (builtins.isPath freeformModule) || (builtins.isString freeformModule);
@@ -1685,7 +1685,7 @@ let
       # `outPath`, and optionally `pin`, the record of how it is
       # pinned. Reading pin files into this shape is for a reader
       # outside caisson-core. The composition's overlays and modules
-      # close over these as `closure-inputs`; a composition that pins
+      # close over these as `closure-sources`; a composition that pins
       # nothing passes `sources = { };`.
       sources,
       # The identity of the tree being built: an attribute set with
@@ -2755,15 +2755,15 @@ in
       mkConfiguration = mkConfigurationFor final;
       finalizeTop = finalizeTopFor final;
       mkPkgOverlay = mkPkgOverlayFor {
-        sources = closure-inputs;
+        sources = closure-sources;
         finalLib = final;
       };
       mkModule = mkModuleForComposition {
-        sources = closure-inputs;
+        sources = closure-sources;
         finalLib = final;
       };
       mkLibOverlay = mkLibOverlayFor {
-        sources = closure-inputs;
+        sources = closure-sources;
         # Lazily bound, so overlay files that do not use them do not
         # force the composed fixpoint through these.
         extraOverlayClosure = {
