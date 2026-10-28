@@ -1051,7 +1051,7 @@ let
           "probe"
         ];
 
-    # `closure-inputs` is the composition's pinned sources.
+    # `closure-sources` is the composition's pinned sources.
     lifecycleOverlayClosureCarriesSources =
       let
         composed = core.mkLib {
@@ -1060,9 +1060,9 @@ let
           };
           libOverlays = lib: {
             a = lib.caisson-core.mkLibOverlay (
-              { closure-inputs, ... }:
+              { closure-sources, ... }:
               {
-                overlay = _final: _prev: { seen = closure-inputs.probe; };
+                overlay = _final: _prev: { seen = closure-sources.probe; };
               }
             );
           };
@@ -3852,9 +3852,9 @@ let
           };
           libOverlays = lib: {
             probe = lib.caisson-core.mkLibOverlay (
-              { closure-inputs, ... }:
+              { closure-sources, ... }:
               {
-                overlay = _final: _prev: { closed = closure-inputs; };
+                overlay = _final: _prev: { closed = closure-sources; };
               }
             );
           };
