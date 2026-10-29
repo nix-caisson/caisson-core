@@ -323,7 +323,8 @@ Under `caisson-core`:
 | Directory readers | `mkModules`, `mkLibOverlays`, `mkPkgOverlays` |
 | Package overlays | `pkgOverlaysFor` |
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `namePathOf`, `definers` |
-| Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide` |
+| Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide`, `isManifest` |
+| Deferred configurations | `mkDeferredConfiguration`, `deferChild`, `isDeferred`, `isDeferredConfiguration`, `mkArg`, `isArg` |
 | Sources | `ecosystemSrc` |
 | Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
 | Attribute sets | `attrsets.genAttrs`, `attrsets.filterAttrs` |
@@ -690,6 +691,102 @@ A level adds a module this way when the configurations directly
 beneath it live on what it describes, such as the deployment of a
 colmena node or the disk layout of a machine. A NixOS configuration
 declared inside such a machine does not get it.
+
+### What an evaluation gives its direct children
+
+`evaluate` may also return `forDirectChildren`, with the per-class
+field `extraDefaultModuleImports` of the same shape. It is read from
+the childless evaluation and recorded on the manifest as
+`forDirectChildren`.
+
+- An addition for class C reaches the configurations of class C
+  declared directly beneath the evaluation, a configuration evaluated
+  per system included, since a system is no level of its own.
+- It is placed in `defaultModuleImports.C` after the inherited
+  selections and the nearest additions, with its `level`, its `file`
+  and `direct = true`.
+- It passes through nothing: a direct child of another class does not
+  receive it, and the configurations beneath a direct child do not
+  inherit it.
+
+### Configurations that read the full evaluation of a level
+
+Each of the three containers may also hold
+`unsafeCrossChildReferences`, by class a boolean. A configuration of
+class C that a setting for C reaches reads the full evaluation of the
+level that set it, with its children, as `crossChildLevel` on its
+manifest, and the name path of that level as `crossChildLevelPath`.
+Elsewhere both are null. Each container reaches as it does for
+additions: `forChildren` every configuration of the class beneath,
+`forNearestChildren` the nearest ones, `forDirectChildren` the direct
+children.
+
+- The view ends at the level that set it: the configuration reaches
+  the level's children of every integration and what is beneath them,
+  and nothing beside or above the level.
+- When several settings reach a configuration, `forDirectChildren`
+  beats `forNearestChildren`, which beats `forChildren`, and within one
+  container the nearest parent that set it wins. A setting through
+  `forNearestChildren` connects at the nearest configuration of its
+  class whether or not it wins there.
+- The childless evaluation exists so that a loop between a child and
+  its parent cannot be written. A configuration that reads the full
+  evaluation of a level can close such a loop, which Nix reports as
+  infinite recursion; the `unsafe` prefix says so.
+- The childless manifest of a level that sets the option for some
+  class carries its full manifest as `crossChildFull`; on other
+  manifests it is null.
+
+### Deferred configurations
+
+A deferred configuration is a function of `{ name, parent, args }`,
+where a configuration is a function of `{ name, parent }`. Its args
+are values a deployment tool supplies after the flake is evaluated,
+such as the outputs of the resources it applies, and they reach the
+configuration only through `args`.
+
+`mkDeferredConfiguration { type; class ? null; record ? { }; configuration; }`
+makes one. `type` and `class` are the integration and the module
+class, known before any args are. `record` is plain data the entry
+carries, such as how the entry is published. `configuration` is
+refused unless it is a function of exactly `{ name, parent, args }`
+returning a manifest.
+
+A parent cannot call a deferred configuration, because it has no args
+to give. It holds an entry under `children` instead, which
+`deferChild { name; parent; } child` makes. The entry holds the
+`record`, the name, type, class and parent, and the function
+`finalize { args; argsSource; }`, which calls the configuration and
+returns its manifest. Nothing in the entry is evaluated at flake time.
+The parent's `history` and `inputs` leave the entry out.
+
+Every manifest says which args its evaluation takes, in `argsNeeded`:
+an attrset whose leaves are made by
+`mkArg { cacheable ? false; type ? null; description ? null; }`, and
+empty for a configuration that takes none. `cacheable` says whether a
+tool may keep a value it found in a cache only its user can read.
+`finalize` fills the args against the `argsNeeded` of the manifest it
+returns: a given arg is passed on unevaluated, and an arg the caller
+did not give throws `caisson-deferred: needs <path>` when it is read.
+Tools read that text to learn which arg an evaluation is blocked on.
+Since the evaluation reads `argsNeeded` from its own result, the names
+at each level of `argsNeeded` must not depend on the args beneath that
+level.
+
+The manifest `finalize` returns also carries `argsSource`, a function
+from the path of an arg, a list of names, to a sentence saying where
+its value came from. It never carries the values.
+
+Every manifest also carries `discoverArgs`, a function of
+`{ system }` returning a derivation whose program, built for and run
+on `system`, prints the args it finds as JSON on its standard output;
+or null, as it is for a configuration with no such program.
+
+A parent that has args of its own, because it was finalized, gives
+its deferred children their part of them by calling `finalize` on
+their entries. It then holds the manifests `finalize` returns under
+`children`, so a tool that walks the tree finds them as it finds any
+other child.
 
 ### Telling names apart: `elide`
 

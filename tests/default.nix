@@ -56,19 +56,29 @@ let
         seenLib = lib;
       };
       outputs.marker = config.marker or null;
+      argsNeeded = config.argsNeeded or { };
+      discoverArgs = config.discoverArgs or ({ system }: null);
       children = builtins.mapAttrs (
         integration:
         builtins.mapAttrs (
-          name:
-          lib.caisson-core.finalizeChild {
-            inherit name;
-            parent = manifest.childlessManifest;
-            what = "`children.${integration}.${name}`";
-          }
+          name: child:
+          (
+            if lib.caisson-core.isDeferredConfiguration child then
+              lib.caisson-core.deferChild
+            else
+              lib.caisson-core.finalizeChild
+          )
+            {
+              inherit name;
+              parent = manifest.childlessManifest;
+              what = "`children.${integration}.${name}`";
+            }
+            child
         )
       ) (config.children or { });
       forChildren = config.forChildren or { };
       forNearestChildren = config.forNearestChildren or { };
+      forDirectChildren = config.forDirectChildren or { };
       events = config.events or [ ];
       record = config.record or { };
     };
@@ -2660,6 +2670,289 @@ let
           nearest = true;
         }
       ];
+
+    # A deferred child is held under its integration as an entry: its
+    # name, type, class and `finalize`, nothing evaluated. The parent's
+    # full manifest, its history and its inputs evaluate without it.
+    # `finalize` with args returns its manifest, finalized against the
+    # parent's childless view, so it inherits what a child inherits and
+    # the nearest additions for its class connect at it. The manifest
+    # carries the args it takes and where their values came from, and
+    # an arg the caller did not give fails when it is read.
+    lifecycleDeferredChildren =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        addition = file: value: {
+          select = _lib: [ value ];
+          inherit file;
+        };
+        selected =
+          manifest:
+          builtins.concatMap (entry: entry.select manifest.value.seenLib) (
+            manifest.defaultModuleImports.stub or [ ]
+          );
+        deferred =
+          lib:
+          lib.caisson-core.mkDeferredConfiguration {
+            type = "deployed";
+            class = "stub";
+            record.published = "as web";
+            configuration =
+              {
+                name,
+                parent,
+                args,
+              }:
+              stubIntegrationWith { class = "stub"; } "deployed" lib (_lib: {
+                marker = args.db.address;
+                key = args.db.key;
+                argsNeeded = {
+                  db.address = lib.caisson-core.mkArg { };
+                  db.key = lib.caisson-core.mkArg { cacheable = true; };
+                };
+              }) { inherit name parent; };
+          };
+        top = composed.caisson-core.finalizeTop (
+          stubIntegrationWith { class = "holder"; } "holder" composed (lib: {
+            forChildren.extraDefaultModuleImports.stub = [ (addition "all.nix" "for all") ];
+            forNearestChildren.extraDefaultModuleImports.stub = [ (addition "near.nix" "nearest") ];
+            children.deployed.web = deferred lib;
+            children.stub.plain = stubIntegrationWith { class = "stub"; } "stub" lib (_lib: { });
+          })
+        );
+        entry = top.children.deployed.web;
+        finalized = entry.finalize {
+          args.db = {
+            address = "10.0.0.5";
+            key = "k";
+          };
+          argsSource = path: "given ${builtins.concatStringsSep "." path}";
+        };
+        # Without `db.key`, the evaluation reads the args it was given
+        # and fails where it reads the one it was not.
+        partial = entry.finalize {
+          args.db.address = "10.0.0.6";
+          argsSource = _: "given";
+        };
+      in
+      core.isDeferred entry
+      && entry.type == "deployed"
+      && entry.class == "stub"
+      && entry.published == "as web"
+      &&
+        builtins.attrNames top.children == [
+          "deployed"
+          "stub"
+        ]
+      && builtins.length top.inputs == 3
+      && builtins.isList top.history
+      && finalized.outputs.marker == "10.0.0.5"
+      && finalized.parent.childless
+      &&
+        selected finalized == [
+          "for all"
+          "nearest"
+        ]
+      && finalized.argsNeeded.db.key.cacheable
+      && finalized.argsSource [
+        "db"
+        "key"
+      ] == "given db.key"
+      && finalized.discoverArgs { system = "x86_64-linux"; } == null
+      && partial.outputs.marker == "10.0.0.6"
+      && throws partial.value.config.key
+      && throws (top.children.stub.plain.parent.children.deployed or (throw "absent"))
+      && throws (
+        core.mkDeferredConfiguration {
+          type = "bad";
+          configuration = { name, parent }: null;
+        }
+      );
+
+    # The args a deferred configuration takes may depend on the args
+    # above them: here `more` holds `second` only when `first` is 1.
+    # The evaluation reads `argsNeeded` from the manifest it returns,
+    # so filling `more` waits until `more` is read. A given arg that
+    # `argsNeeded` does not declare is passed on. `discoverArgs` is read
+    # from the manifest as well, for the system of the tool.
+    lifecycleArgsFillFromTheManifest =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        entry = composed.caisson-core.deferChild {
+          name = "member";
+          parent = composed.caisson-core.libManifest;
+        } (
+          composed.caisson-core.mkDeferredConfiguration {
+            type = "stub";
+            configuration =
+              {
+                name,
+                parent,
+                args,
+              }:
+              stubIntegration "stub" composed (_lib: {
+                marker = args.more.second or "none";
+                extra = args.extra or null;
+                argsNeeded = {
+                  first = composed.caisson-core.mkArg { };
+                  more = if args.first == 1 then { second = composed.caisson-core.mkArg { }; } else { };
+                };
+                discoverArgs = { system }: "${name} under ${parent.type} for ${system}";
+              }) { inherit name parent; };
+          }
+        );
+        finalize =
+          args:
+          entry.finalize {
+            inherit args;
+            argsSource = _: "given";
+          };
+        given = finalize {
+          first = 1;
+          more.second = "two";
+          extra = "kept";
+        };
+      in
+      given.outputs.marker == "two"
+      && given.value.config.extra == "kept"
+      && (finalize { first = 2; }).outputs.marker == "none"
+      && throws (finalize { first = 1; }).outputs.marker
+      # A value that is not an attribute set, given where `argsNeeded`
+      # declares args beneath it, fails with an error that names its
+      # path, which `builtins.tryEval` catches. The error of `//` on a
+      # string would abort the whole suite instead.
+      && throws (finalize {
+        first = 1;
+        more = "two";
+      }).outputs.marker
+      && throws (finalize "all").outputs.marker
+      && given.discoverArgs { system = "x86_64-linux"; } == "member under lib for x86_64-linux";
+
+    # What a level gives its direct children (`forDirectChildren`)
+    # reaches the children of the class directly beneath it, a child
+    # evaluated per system included, after the inherited defaults and
+    # the nearest additions, and marked `direct = true`. It does not
+    # pass through a configuration of another class, and the
+    # configurations beneath a direct child do not inherit it.
+    lifecycleDirectAdditionsReachDirectChildrenOnly =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+          systems = [ "x86_64-linux" ];
+        };
+        classed = class: stubIntegrationWith { inherit class; };
+        addition = file: value: {
+          select = _lib: [ value ];
+          inherit file;
+        };
+        selected =
+          manifest:
+          builtins.concatMap (entry: entry.select manifest.value.seenLib) (
+            manifest.defaultModuleImports.stub or [ ]
+          );
+        top = composed.caisson-core.finalizeTop (
+          classed "holder" "holder" composed (lib: {
+            forChildren.extraDefaultModuleImports.stub = [ (addition "all.nix" "for all") ];
+            forNearestChildren.extraDefaultModuleImports.stub = [ (addition "near.nix" "nearest") ];
+            forDirectChildren.extraDefaultModuleImports.stub = [ (addition "direct.nix" "direct") ];
+            children.stub.child = classed "stub" "stub" lib (lib: {
+              children.stub.grandchild = classed "stub" "stub" lib (_lib: { });
+            });
+            children.group.layout = classed "group" "group" lib (lib: {
+              children.stub.inside = classed "stub" "stub" lib (_lib: { });
+            });
+            children.machine.host = stubIntegrationWith {
+              class = "stub";
+              perSystem = true;
+            } "machine" lib (_lib: { });
+          })
+        );
+        child = top.children.stub.child;
+      in
+      selected child == [
+        "for all"
+        "nearest"
+        "direct"
+      ]
+      && (builtins.elemAt child.defaultModuleImports.stub 2).direct
+      && selected child.children.stub.grandchild == [ "for all" ]
+      &&
+        selected top.children.group.layout.children.stub.inside == [
+          "for all"
+          "nearest"
+        ]
+      &&
+        selected top.children.system.x86_64-linux.children.machine.host == [
+          "for all"
+          "nearest"
+          "direct"
+        ];
+
+    # `unsafeCrossChildReferences.<class>` lets the configurations of
+    # the class it reaches read the full evaluation of the level that
+    # set it (`crossChildLevel`), where they would otherwise see only
+    # its childless view. Each container reaches as it does for
+    # additions. A setting through `forDirectChildren` beats one through
+    # `forNearestChildren`, which beats one through `forChildren`, and
+    # within one container the nearest parent wins. A setting through
+    # `forNearestChildren` connects at the nearest configuration of its
+    # class whether or not it wins there.
+    lifecycleCrossChildReferences =
+      let
+        composed = core.mkLib {
+          sources = { };
+          name = "probe-project";
+        };
+        classed = class: stubIntegrationWith { inherit class; };
+        levelOf =
+          manifest: if manifest.crossChildLevel == null then null else manifest.crossChildLevel.name;
+        top = composed.caisson-core.finalizeTop (
+          classed "holder" "holder" composed (lib: {
+            forNearestChildren.unsafeCrossChildReferences.stub = true;
+            children.group.layout = classed "group" "group" lib (lib: {
+              children.stub.node = classed "stub" "stub" lib (lib: {
+                children.stub.inner = classed "stub" "stub" lib (_lib: { });
+              });
+            });
+            children.stub.sibling = classed "stub" "stub" lib (_lib: { });
+            children.outer.wide = classed "outer" "outer" lib (lib: {
+              forChildren.unsafeCrossChildReferences.leaf = true;
+              forDirectChildren.unsafeCrossChildReferences.stub = true;
+              children.outer.mid = classed "outer" "outer" lib (lib: {
+                forChildren.unsafeCrossChildReferences.leaf = true;
+                children.leaf.deep = classed "leaf" "leaf" lib (_lib: { });
+              });
+              children.leaf.shallow = classed "leaf" "leaf" lib (_lib: { });
+              children.stub.direct = classed "stub" "stub" lib (_lib: { });
+            });
+          })
+        );
+        node = top.children.group.layout.children.stub.node;
+        wide = top.children.outer.wide;
+      in
+      levelOf node == "probe-project"
+      && !node.crossChildLevel.childless
+      && node.crossChildLevel.children ? group
+      && levelOf node.children.stub.inner == null
+      && levelOf top.children.stub.sibling == "probe-project"
+      && levelOf wide.children.stub.direct == "wide"
+      && levelOf wide.children.outer.mid.children.leaf.deep == "mid"
+      && levelOf wide.children.leaf.shallow == "wide"
+      && node.crossChildLevelPath == [ ]
+      &&
+        wide.children.stub.direct.crossChildLevelPath == [
+          {
+            type = "outer";
+            name = "wide";
+          }
+        ];
 
     # `elide` keeps, of each path, its last segment and the segments
     # where paths that end in the same name fork. A name that is alone
