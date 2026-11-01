@@ -122,11 +122,11 @@ let
   # consuming it as a project beside a local entry that imports the
   # project's default entry through the consumer's registry.
   pkgOverlayProducer = core.mkLib {
-    sources = { };
+    dependencies = { };
     pkgOverlays = lib: lib.caisson-core.mkPkgOverlays ./fixtures/pkg-overlays-dir;
   };
   pkgOverlayConsumer = core.mkLib {
-    sources = { };
+    dependencies = { };
     projects.producer.pkgOverlays = pkgOverlayProducer.caisson-core.libManifest.pkgOverlays;
     pkgOverlays = lib: {
       local = lib.caisson-core.mkPkgOverlay (
@@ -193,7 +193,7 @@ let
       producerWith =
         importOf:
         core.mkLib {
-          sources = { };
+          dependencies = { };
           ${kind.argument} =
             lib:
             let
@@ -218,7 +218,7 @@ let
       consumerOf =
         producer: extra:
         core.mkLib {
-          sources = { };
+          dependencies = { };
           projects.producer.${kind.argument} = localOf producer;
           ${kind.argument} = lib: extra (kind.mk lib);
         };
@@ -265,7 +265,7 @@ let
       ImportOfAnUnregisteredNameIsRefused = throws (
         (kind.builtFrom (
           core.mkLib {
-            sources = { };
+            dependencies = { };
             ${kind.argument} =
               lib:
               let
@@ -300,7 +300,7 @@ let
         builtins.attrNames (
           kind.builtFrom (
             core.mkLib {
-              sources = { };
+              dependencies = { };
               ${kind.argument} =
                 lib:
                 let
@@ -329,7 +329,7 @@ let
       AKeyReachedTwiceTakesTheFirstPositionAndTheLastValue =
         let
           composed = core.mkLib {
-            sources = { };
+            dependencies = { };
             ${kind.argument} =
               lib:
               let
@@ -581,20 +581,20 @@ let
         name = "probe-lib";
         explicit = "E";
         defaults.probe-lib = "D";
-        sources.probe-lib = "S";
+        dependencies.probe-lib = "S";
       } == "E";
 
     resolveDefaultBeatsSource =
       resolve {
         name = "probe-lib";
         defaults.probe-lib = "D";
-        sources.probe-lib = "S";
+        dependencies.probe-lib = "S";
       } == "D";
 
     resolveSourceByExactName =
       resolve {
         name = "probe-lib";
-        sources = {
+        dependencies = {
           probe-lib = "S";
           probe = "wrong";
         };
@@ -734,22 +734,22 @@ let
       };
 
     listsComposedIntoMkLib =
-      (core.mkLib { sources = { }; }).caisson-core.lists.unique [
+      (core.mkLib { dependencies = { }; }).caisson-core.lists.unique [
         1
         1
       ] == [ 1 ];
 
     # Lifecycle: mkLib and the registration machinery.
 
-    # mkLib's signature is its pattern, read back as data: `sources` is
+    # mkLib's signature is its pattern, read back as data: `dependencies` is
     # required, `root` and the rest are optional, and `inputs` and the
     # old `ecosystems` are not arguments, so Nix refuses them at the
     # call site (an error `tryEval` cannot catch, which is why the
-    # pattern is what is tested). A `sources` of the wrong type is
+    # pattern is what is tested). A `dependencies` of the wrong type is
     # caisson-core's refusal.
     lifecycleMkLibSignature =
       builtins.functionArgs core.mkLib == {
-        sources = false;
+        dependencies = false;
         root = true;
         name = true;
         systems = true;
@@ -763,19 +763,19 @@ let
         pkgOverlays = true;
         pkgSets = true;
       }
-      && throws (core.mkLib { sources = [ ]; });
+      && throws (core.mkLib { dependencies = [ ]; });
 
     lifecycleMkLibRootShape =
-      (core.mkLib { sources = { }; }).caisson-core.libManifest.root == null
+      (core.mkLib { dependencies = { }; }).caisson-core.libManifest.root == null
       && throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           root = { };
         }
       ).caisson-core.libManifest
       && throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           root = "x";
         }
       ).caisson-core.libManifest;
@@ -793,7 +793,7 @@ let
           overlay = _final: prev: { deep = prev.deeper + "e"; };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             main = lib.caisson-core.mkLibOverlay (
               { ... }:
@@ -814,14 +814,14 @@ let
     # is a bare library: caisson-core ships no entry that needs one.
     lifecycleBareCompositionNeedsNoSource =
       let
-        composed = core.mkLib { sources = { }; };
+        composed = core.mkLib { dependencies = { }; };
       in
       builtins.isAttrs composed.caisson-core.libManifest && !(composed ? extend);
 
     lifecycleComposesOverlays =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             a-base = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = 1; }; });
             b = lib.caisson-core.mkLibOverlay (
@@ -844,8 +844,8 @@ let
     lifecycleSourceLibraryEntryComposesFromTheDeclaredSource =
       let
         composed = core.mkLib {
-          sources.lib-stub = ./fixtures/lib-stub;
-          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
+          dependencies.lib-stub = ./fixtures/lib-stub;
+          defaultEcosystemSrc = dependencies: { probe-lib = dependencies.lib-stub; };
           libOverlays = lib: {
             probe = lib.caisson-core.mkLibOverlay (
               { mkLibOverlay, ... }:
@@ -867,9 +867,9 @@ let
     lifecycleSourceLibraryEntryRecordsItsFile =
       let
         composed = core.mkLib {
-          sources.lib-stub = ./fixtures/lib-stub;
+          dependencies.lib-stub = ./fixtures/lib-stub;
           name = "probe-project";
-          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
+          defaultEcosystemSrc = dependencies: { probe-lib = dependencies.lib-stub; };
           libOverlays = lib: {
             lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
           };
@@ -892,7 +892,7 @@ let
         withImporter =
           importer:
           core.mkLib {
-            sources = { };
+            dependencies = { };
             libOverlays = lib: {
               probe = lib.caisson-core.mkLibOverlay (
                 { mkLibOverlay, ... }:
@@ -925,13 +925,13 @@ let
             }
           );
         otherTree = core.mkLib {
-          sources.lib-stub = ./fixtures/lib-stub;
-          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
+          dependencies.lib-stub = ./fixtures/lib-stub;
+          defaultEcosystemSrc = dependencies: { probe-lib = dependencies.lib-stub; };
           libOverlays = lib: { exported = exported lib; };
         };
         here = core.mkLib {
-          sources.other-lib-stub = ./fixtures/other-lib-stub;
-          defaultEcosystemSrc = sources: { probe-lib = sources.other-lib-stub; };
+          dependencies.other-lib-stub = ./fixtures/other-lib-stub;
+          defaultEcosystemSrc = dependencies: { probe-lib = dependencies.other-lib-stub; };
           projects.other.libOverlays = {
             inherit (otherTree.caisson-core.libManifest.libOverlays) exported;
           };
@@ -947,13 +947,13 @@ let
         project =
           marker:
           (core.mkLib {
-            sources = { };
+            dependencies = { };
             libOverlays = lib: {
               default = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { ${marker} = true; }; });
             };
           }).caisson-core.libManifest.libOverlays;
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           projects = {
             a = {
               libOverlays = {
@@ -995,15 +995,15 @@ let
             };
         };
         project = core.mkLib {
-          sources.project-probe = "project";
-          defaultEcosystemSrc = sources: { probe = sources.project-probe; };
+          dependencies.project-probe = "project";
+          defaultEcosystemSrc = dependencies: { probe = dependencies.project-probe; };
           libOverlays = _lib: { inherit reader; };
         };
         consumer = core.mkLib {
-          sources.pinned = "consumer-pin";
-          sources.probe = "shadowed";
-          sources.consumer-probe = "consumer";
-          defaultEcosystemSrc = sources: { probe = sources.consumer-probe; };
+          dependencies.pinned = "consumer-pin";
+          dependencies.probe = "shadowed";
+          dependencies.consumer-probe = "consumer";
+          defaultEcosystemSrc = dependencies: { probe = dependencies.consumer-probe; };
           projects.dep.libOverlays = {
             inherit (project.caisson-core.libManifest.libOverlays) reader;
           };
@@ -1030,7 +1030,7 @@ let
     lifecycleRegistrationReplacesAnImportedEntry =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             lib-from-source = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { stubIncrement = n: n * 3; }; });
             probe = lib.caisson-core.mkLibOverlay (
@@ -1051,18 +1051,21 @@ let
           "probe"
         ];
 
-    # `closure-inputs` is the composition's pinned sources.
-    lifecycleOverlayClosureCarriesSources =
+    # A registered overlay reads the dependencies of its composition
+    # through `closure-lib`, inside its `overlay` function.
+    lifecycleOverlayReadsDependenciesThroughClosureLib =
       let
         composed = core.mkLib {
-          sources = {
+          dependencies = {
             probe = 42;
           };
           libOverlays = lib: {
             a = lib.caisson-core.mkLibOverlay (
-              { closure-inputs, ... }:
+              { closure-lib, ... }:
               {
-                overlay = _final: _prev: { seen = closure-inputs.probe; };
+                overlay = _final: _prev: {
+                  seen = closure-lib.caisson-core.libManifest.dependencies.probe;
+                };
               }
             );
           };
@@ -1070,10 +1073,47 @@ let
       in
       composed.seen == 42;
 
+    # The closure attribute set of a registered file holds the composed
+    # lib and the registration helpers for its kind of file.
+    lifecycleClosureAttributeNames =
+      let
+        composed = core.mkLib {
+          dependencies = { };
+          libOverlays = lib: {
+            a = lib.caisson-core.mkLibOverlay (
+              closure:
+              {
+                overlay = _final: _prev: { closureNames = builtins.attrNames closure; };
+              }
+            );
+          };
+        };
+        pkgOverlayNames =
+          (composed.caisson-core.mkPkgOverlay (closure: {
+            overlay = _final: _prev: { names = builtins.attrNames closure; };
+          })).overlay
+            null
+            null;
+        moduleNames = (composed.caisson-core.mkModule "nixos" (closure: { names = builtins.attrNames closure; })).names or null;
+      in
+      composed.closureNames == [
+        "closure-lib"
+        "mkLibOverlay"
+        "mkModule"
+      ]
+      && pkgOverlayNames.names == [
+        "closure-lib"
+        "mkPkgOverlay"
+      ]
+      && moduleNames == [
+        "closure-lib"
+        "mkModule"
+      ];
+
     lifecycleInjectsMachinery =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
         };
       in
       builtins.isFunction composed.caisson-core.mkLib
@@ -1097,7 +1137,7 @@ let
     lifecycleKeepsTheRegistriesInTheManifest =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
         };
       in
       builtins.all (name: !(composed.caisson-core ? ${name})) [
@@ -1113,7 +1153,7 @@ let
     lifecycleOverlayClosureCarriesLib =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             marker = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { marker = "composed"; }; });
             probe = lib.caisson-core.mkLibOverlay (
@@ -1130,7 +1170,7 @@ let
     readersMkModulesReadsClassDirectories =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           modules = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
         };
         registry = composed.caisson-core.libManifest.modules;
@@ -1150,7 +1190,7 @@ let
     readersMkModulesRegistersConfigs =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           configs = lib: lib.caisson-core.mkModules ./fixtures/modules-dir;
         };
       in
@@ -1160,7 +1200,7 @@ let
     readersMkModulesRefusesAStrayFile =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
         };
       in
       builtins.isAttrs (composed.caisson-core.mkModules ./fixtures/modules-dir)
@@ -1169,7 +1209,7 @@ let
     readersMkModulesRefusesAnEntryWithoutDefault =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
         };
       in
       throws (composed.caisson-core.mkModules ./fixtures/modules-dir-empty-entry);
@@ -1177,7 +1217,7 @@ let
     readersMkLibOverlaysReadsEntries =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: lib.caisson-core.mkLibOverlays ./fixtures/lib-overlays-dir;
         };
       in
@@ -1199,7 +1239,7 @@ let
     pkgOverlaysRegisterFromAFunction =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           pkgOverlays = lib: {
             hello = lib.caisson-core.mkPkgOverlay ({ ... }: { overlay = _final: _prev: { hello = "hi"; }; });
           };
@@ -1211,12 +1251,12 @@ let
       && entry.project == null
       && entry.imports == [ ]
       && (applyPkgOverlays (composed.caisson-core.pkgOverlaysFor [ entry ])).hello == "hi"
-      && (core.mkLib { sources = { }; }).caisson-core.libManifest.pkgOverlays == { };
+      && (core.mkLib { dependencies = { }; }).caisson-core.libManifest.pkgOverlays == { };
 
     pkgOverlaysRefuseNonFunction =
       !(builtins.tryEval (
         builtins.seq (core.mkLib {
-          sources = { };
+          dependencies = { };
           pkgOverlays = { };
         }) true
       )).success;
@@ -1331,7 +1371,7 @@ let
     lifecycleLocalModulesRegister =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           modules = composedLib: {
             nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
           };
@@ -1342,7 +1382,7 @@ let
     lifecycleConfigsRegister =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           configs = composedLib: {
             structural.top = composedLib.caisson-core.mkModule "structural" (
               { ... }: { config.origin = "top"; }
@@ -1351,19 +1391,19 @@ let
         };
       in
       composed.caisson-core.libManifest.configs.structural.top.config.origin == "top"
-      && (core.mkLib { sources = { }; }).caisson-core.libManifest.configs == { };
+      && (core.mkLib { dependencies = { }; }).caisson-core.libManifest.configs == { };
 
     lifecycleConfigsRefusesNonFunction =
       !(builtins.tryEval (
         builtins.seq (core.mkLib {
-          sources = { };
+          dependencies = { };
           configs = { };
         }) true
       )).success;
 
     lifecycleManifestCapturesMkLibFacts =
       let
-        theSources = {
+        theDependencies = {
           probe = {
             outPath = ./fixtures/pins-plain-dir;
           };
@@ -1373,7 +1413,7 @@ let
           dirty = false;
         };
         composed = core.mkLib {
-          sources = theSources;
+          dependencies = theDependencies;
           root = theRoot;
           modules = composedLib: {
             nixos.local = composedLib.caisson-core.mkModule "nixos" ({ ... }: { config.origin = "local"; });
@@ -1392,6 +1432,7 @@ let
         "configs"
         "defaultEcosystemSrc"
         "defaultEcosystemSrcNames"
+        "dependencies"
         "entries"
         "history"
         "inputs"
@@ -1404,7 +1445,6 @@ let
         "pkgSets"
         "projects"
         "root"
-        "sources"
         "systems"
         "type"
       ]
@@ -1417,7 +1457,7 @@ let
       && manifest.nearest == { }
       && manifest.children == { }
       && manifest.pkgOverlays == { }
-      && manifest.sources == theSources
+      && manifest.dependencies == theDependencies
       && manifest.root == theRoot
       && manifest.defaultEcosystemSrc == { }
       && manifest.systems == null
@@ -1430,7 +1470,7 @@ let
     lifecyclePhaseManifestsArePresentAndNullUntilFilledIn =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
         };
       in
       builtins.isAttrs composed.caisson-core.libManifest
@@ -1443,7 +1483,7 @@ let
       let
         inherit (core) manifestOf;
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe";
         };
         libManifest = composed.caisson-core.libManifest;
@@ -1478,7 +1518,7 @@ let
     lifecycleSystemsAreDeclaredOnMkLib =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           systems = [
             "x86_64-linux"
             "aarch64-linux"
@@ -1493,13 +1533,13 @@ let
     lifecycleSystemsMustBeAListOfStrings =
       throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           systems = "x86_64-linux";
         }
       )
       && throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           systems = [ 1 ];
         }
       );
@@ -1509,7 +1549,7 @@ let
     lifecycleNameIsDeclaredOnMkLib =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "my-project";
         };
       in
@@ -1518,7 +1558,7 @@ let
     lifecycleNameIsAbsentWhenUndeclared =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
         };
       in
       !(composed.caisson-core.libManifest ? name);
@@ -1535,7 +1575,7 @@ let
           overlay = _final: _prev: { };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             base = lib.caisson-core.mkLibOverlay ({ ... }: { overlay = _final: _prev: { }; });
             top = lib.caisson-core.mkLibOverlay (
@@ -1574,7 +1614,7 @@ let
     lifecycleHistoryRecordsRegistrationsAndLayers =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           libOverlays = lib: {
             base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
@@ -1619,7 +1659,7 @@ let
     lifecycleCoreStageManifestHoldsTheLibOverlayRegistry =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
           };
@@ -1656,7 +1696,7 @@ let
     lifecycleStagesEachCarryTheirManifest =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           libOverlays = lib: {
             base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
@@ -1700,7 +1740,7 @@ let
       && !fullManifest.childless
       && fullManifest.modules.nixos ? local
       && composed.caisson-core.libManifest.modules.nixos ? local
-      && builtins.all (m: m.name == "probe-project" && m.sources == { }) [
+      && builtins.all (m: m.name == "probe-project" && m.dependencies == { }) [
         coreManifest
         bootstrapManifest
         fullManifest
@@ -1713,7 +1753,7 @@ let
     lifecycleRegistrationsCloseOverTheFullLib =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           modules = lib: {
             generic.probe = lib.caisson-core.mkModule "generic" ./fixtures/closure-probe;
             generic.sibling = lib.caisson-core.mkModule "generic" ./fixtures/closure-probe;
@@ -1751,7 +1791,7 @@ let
             registryThrough = lib.caisson-core.libManifest.modules;
           };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           modules = lib: {
             generic.local = lib.caisson-core.mkModule "generic" ({ ... }: { });
@@ -1803,7 +1843,7 @@ let
         pkgSetsOf =
           declared:
           (core.mkLib {
-            sources = { };
+            dependencies = { };
             pkgSets = _lib: declared;
           }).caisson-core.libManifest.pkgSets;
         manifest = {
@@ -1846,7 +1886,7 @@ let
           type = "probe";
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             reader = lib.caisson-core.mkLibOverlay (
               { ... }:
@@ -1875,7 +1915,7 @@ let
 
     lifecycleWithManifestsFillsInOnlyPhaseManifests =
       let
-        composed = core.mkLib { sources = { }; };
+        composed = core.mkLib { dependencies = { }; };
         fill = given: (composed.caisson-core.withManifests given).caisson-core;
       in
       throws (fill { libManifest = null; }).libManifest
@@ -1896,7 +1936,7 @@ let
     lifecycleEvaluationHasAChildlessAndAFullView =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
           modules = lib: {
@@ -1943,7 +1983,7 @@ let
     lifecycleChildrenAreFinalizedAgainstTheChildlessView =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
         };
         top = composed.caisson-core.finalizeTop (
@@ -2001,7 +2041,7 @@ let
     # reads that value forces it.
     lifecycleChildlessViewIsEvaluatedOnDemand =
       let
-        composed = core.mkLib { sources = { }; };
+        composed = core.mkLib { dependencies = { }; };
         failing =
           lib: module:
           stubIntegration "stub" lib (
@@ -2042,7 +2082,7 @@ let
         composedWith =
           systems:
           core.mkLib {
-            sources = { };
+            dependencies = { };
             name = "probe-project";
             inherit systems;
           };
@@ -2096,7 +2136,7 @@ let
     lifecycleAnEvaluationRecordsTheFieldsItsIntegrationNames =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
         };
         recording =
@@ -2124,7 +2164,7 @@ let
     lifecycleEveryConfigurationHasAHistory =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
@@ -2235,7 +2275,7 @@ let
     lifecycleSystemsInForceBeneathAConfiguration =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [
             "x86_64-linux"
@@ -2314,11 +2354,11 @@ let
             perSystemStubIntegration "machine" composed (_lib: throw "evaluated with no system")
           );
       in
-      evaluationsOn (core.mkLib { sources = { }; }) == { }
+      evaluationsOn (core.mkLib { dependencies = { }; }) == { }
       &&
         evaluationsOn (
           core.mkLib {
-            sources = { };
+            dependencies = { };
             systems = [ ];
           }
         ) == { };
@@ -2336,7 +2376,7 @@ let
     lifecycleParentHoldsEvaluationsUnderTheirSystem =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [
             "x86_64-linux"
@@ -2420,7 +2460,7 @@ let
     lifecycleARecordedPkgSetSelectionIsInForceBeneath =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
@@ -2466,7 +2506,7 @@ let
     lifecycleAPkgSetSelectionIsGivenForWhatIsBeneath =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
@@ -2512,7 +2552,7 @@ let
     lifecycleDefaultAdditionsReachWhatIsBeneath =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
@@ -2584,7 +2624,7 @@ let
     lifecycleNearestAdditionsConnectOnce =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
@@ -2682,7 +2722,7 @@ let
     lifecycleDeferredChildren =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
         };
         addition = file: value: {
@@ -2781,7 +2821,7 @@ let
     lifecycleArgsFillFromTheManifest =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
         };
         entry = composed.caisson-core.deferChild {
@@ -2843,7 +2883,7 @@ let
     lifecycleDirectAdditionsReachDirectChildrenOnly =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           systems = [ "x86_64-linux" ];
         };
@@ -2907,7 +2947,7 @@ let
     lifecycleCrossChildReferences =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
         };
         classed = class: stubIntegrationWith { inherit class; };
@@ -3159,7 +3199,7 @@ let
     lifecycleEvaluationIsAConfiguration =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
         };
         configuration =
@@ -3193,13 +3233,13 @@ let
     lifecyclePkgSetsMustBeAFunctionReturningAnAttrset =
       throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           pkgSets = { };
         }
       )
       && throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           pkgSets = _lib: [ ];
         }
       );
@@ -3210,7 +3250,7 @@ let
     lifecycleStageHistoriesArePrefixes =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           name = "probe-project";
           libOverlays = lib: {
             base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
@@ -3262,7 +3302,7 @@ let
     lifecycleReplacingAForcedEntryAppliesFromBootstrap =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             "caisson-core/strings" = lib.caisson-core.mkLibOverlay (
               { ... }:
@@ -3302,7 +3342,7 @@ let
     lifecycleReadersComeFromTheLibraryHandedIn =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             "caisson-core/readers" = lib.caisson-core.mkLibOverlay (
               { ... }:
@@ -3335,7 +3375,7 @@ let
           selection:
           core.mkLib (
             {
-              sources = { };
+              dependencies = { };
               libOverlays = _lib: {
                 one = marking "one";
                 two = marking "two";
@@ -3388,7 +3428,7 @@ let
     lifecycleDefinersNameTheWinnerAndTheShadowed =
       let
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           libOverlays = lib: {
             base = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/base;
             top = lib.caisson-core.mkLibOverlay ./fixtures/history-overlays/top;
@@ -3434,24 +3474,24 @@ let
     lifecycleNameMustBeAString =
       throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           name = [ "my-project" ];
         }
       )
       && throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           name = 1;
         }
       );
 
-    # `defaultEcosystemSrc` is a selection from the tree's sources: the
+    # `defaultEcosystemSrc` is a selection from the tree's dependencies: the
     # manifest holds what it selected, by ecosystem.
     lifecycleEcosystemDeclarationsJoinTheManifest =
       let
         composed = core.mkLib {
-          sources.pinned = "/probe-source";
-          defaultEcosystemSrc = sources: { probe = sources.pinned; };
+          dependencies.pinned = "/probe-source";
+          defaultEcosystemSrc = dependencies: { probe = dependencies.pinned; };
         };
       in
       composed.caisson-core.libManifest.defaultEcosystemSrc.probe == "/probe-source";
@@ -3461,13 +3501,13 @@ let
     lifecycleDefaultEcosystemSrcMustBeASelection =
       throws (
         core.mkLib {
-          sources = { };
+          dependencies = { };
           defaultEcosystemSrc = 42;
         }
       )
       && throws (
         core.mkLib {
-          sources.pinned = "/probe-source";
+          dependencies.pinned = "/probe-source";
           defaultEcosystemSrc = {
             probe = "/probe-source";
           };
@@ -3475,8 +3515,8 @@ let
       )
       && throws (
         core.mkLib {
-          sources = { };
-          defaultEcosystemSrc = _sources: 42;
+          dependencies = { };
+          defaultEcosystemSrc = _dependencies: 42;
         }
       );
 
@@ -3488,14 +3528,14 @@ let
       let
         manifest =
           (core.mkLib {
-            sources = {
+            dependencies = {
               first.outPath = "/probe-first";
               second.outPath = "/probe-second";
-              unread = builtins.throw "the unread source was forced";
+              unread = builtins.throw "the unread dependency was forced";
             };
-            defaultEcosystemSrc = sources: {
-              picked = sources.first;
-              built.outPath = "${sources.second}/lib";
+            defaultEcosystemSrc = dependencies: {
+              picked = dependencies.first;
+              built.outPath = "${dependencies.second}/lib";
             };
           }).caisson-core.libManifest;
       in
@@ -3509,18 +3549,18 @@ let
     # null for a value the selection builds.
     resolveSelectedSourceName =
       let
-        sources = {
+        dependencies = {
           first.outPath = "/probe-first";
-          unread = builtins.throw "the unread source was forced";
+          unread = builtins.throw "the unread dependency was forced";
         };
       in
       core.selectedSourceName {
-        inherit sources;
-        selection = sources: sources.first;
+        inherit dependencies;
+        selection = dependencies: dependencies.first;
       } == "first"
       && core.selectedSourceName {
-        inherit sources;
-        selection = sources: { outPath = "${sources.first}/lib"; };
+        inherit dependencies;
+        selection = dependencies: { outPath = "${dependencies.first}/lib"; };
       } == null;
 
     # `namePathOf` gives the `{ type, name }` of each manifest beneath
@@ -3569,10 +3609,10 @@ let
 
     lifecycleInjectedMkLibIsTheSameMkLib =
       let
-        outer = core.mkLib { sources = { }; };
+        outer = core.mkLib { dependencies = { }; };
         inner = outer.caisson-core.mkLib {
-          sources.lib-stub = ./fixtures/lib-stub;
-          defaultEcosystemSrc = sources: { probe-lib = sources.lib-stub; };
+          dependencies.lib-stub = ./fixtures/lib-stub;
+          defaultEcosystemSrc = dependencies: { probe-lib = dependencies.lib-stub; };
           libOverlays = lib: {
             lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
           };
@@ -3600,7 +3640,7 @@ let
           };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           projects = {
             inherit dep;
           };
@@ -3650,7 +3690,7 @@ let
           };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           projects = {
             inherit dep;
           };
@@ -3676,7 +3716,7 @@ let
           };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           projects = {
             inherit dep;
           };
@@ -3695,7 +3735,7 @@ let
           };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           projects = {
             inherit dep;
           };
@@ -3726,7 +3766,7 @@ let
           };
         };
         composed = core.mkLib {
-          sources = { };
+          dependencies = { };
           projects = {
             inherit dep;
           };
@@ -3755,7 +3795,7 @@ let
         };
         registry =
           (core.mkLib {
-            sources = { };
+            dependencies = { };
             projects = {
               inherit dep;
             };
@@ -3787,7 +3827,7 @@ let
         };
         manifest =
           (core.mkLib {
-            sources = { };
+            dependencies = { };
             projects = {
               inherit dep;
             };
@@ -3808,7 +3848,7 @@ let
 
     lifecycleProjectsMustBeAnAttrset = throws (
       core.mkLib {
-        sources = { };
+        dependencies = { };
         projects = 42;
       }
     );
@@ -3819,21 +3859,20 @@ let
     # keyed entries.
     lifecycleCoreEntriesComposeDirectly =
       let
-        r = compose { entries = builtins.attrValues (core.coreEntries { sources = { }; }); };
+        r = compose { entries = builtins.attrValues (core.coreEntries { dependencies = { }; }); };
       in
       builtins.isFunction r.lib.caisson-core.mkLibOverlay
       && builtins.isFunction r.lib.caisson-core.mkLib
       && r.meta.order == coreNames
       && builtins.attrNames r.lib.caisson-core == builtins.attrNames core;
 
-    # A source whose pin names the directory holding its pin files (as
+    # A dependency whose pin names the directory holding its pin files (as
     # a reader given a directory records it): the record states the
     # pin files relative to the root when the directory lies in the
-    # root's tree, and keeps `pin.dir` otherwise; the source tree
-    # itself is what the closure sees, unchanged.
+    # root's tree, and keeps `pin.dir` otherwise.
     lifecycleRecordRelativizesPinFiles =
       let
-        read.sources.local = {
+        read.dependencies.local = {
           outPath = ./fixtures/pins-plain-dir;
           pin = {
             system = "flake";
@@ -3845,36 +3884,27 @@ let
           };
         };
         inside = core.mkLib {
-          inherit (read) sources;
+          inherit (read) dependencies;
           root = {
             outPath = ./fixtures;
             dirty = false;
           };
-          libOverlays = lib: {
-            probe = lib.caisson-core.mkLibOverlay (
-              { closure-inputs, ... }:
-              {
-                overlay = _final: _prev: { closed = closure-inputs; };
-              }
-            );
-          };
         };
         outside = core.mkLib {
-          inherit (read) sources;
+          inherit (read) dependencies;
           root = {
             outPath = ./fixtures/other-lib-stub;
             dirty = false;
           };
         };
-        noRoot = core.mkLib { inherit (read) sources; };
-        pinOf = lib: lib.caisson-core.libManifest.sources.local.pin;
+        noRoot = core.mkLib { inherit (read) dependencies; };
+        pinOf = lib: lib.caisson-core.libManifest.dependencies.local.pin;
       in
       (pinOf inside).files == {
         refs = "lib-stub/flake.nix";
         revisions = "lib-stub/flake.lock";
       }
       && !((pinOf inside) ? dir)
-      && inside.closed.local.pin.dir == ./fixtures/lib-stub
       && (pinOf outside).dir == ./fixtures/lib-stub
       && (pinOf outside).files.refs == "flake.nix"
       && (pinOf noRoot).dir == ./fixtures/lib-stub;
@@ -3885,7 +3915,7 @@ let
     # a flake input from the manifest leaves it unread.
     lifecycleRecordLeavesTheRootUnread =
       (core.mkLib {
-        sources.probe = {
+        dependencies.probe = {
           outPath = ./fixtures/pins-plain-dir;
           pin.system = "flake";
         };
@@ -3893,13 +3923,13 @@ let
           outPath = throw "root read";
           dirty = false;
         };
-      }).caisson-core.libManifest.sources.probe.outPath == ./fixtures/pins-plain-dir;
+      }).caisson-core.libManifest.dependencies.probe.outPath == ./fixtures/pins-plain-dir;
 
-    # Resolution reads the pinned sources: a source named exactly as
-    # the ecosystem supplies it when nothing is declared.
-    lifecycleSourceLibraryFromPinnedSources =
+    # Resolution reads the dependencies: a dependency named exactly as
+    # the ecosystem supplies the source when nothing is declared.
+    lifecycleSourceLibraryFromDependencies =
       (core.mkLib {
-        sources.probe-lib = ./fixtures/lib-stub;
+        dependencies.probe-lib = ./fixtures/lib-stub;
         libOverlays = lib: {
           lib-from-source = lib.caisson-core.mkLibOverlay ./fixtures/lib-from-source;
         };

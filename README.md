@@ -83,30 +83,30 @@ core.resolve {
   name = "some-ecosystem";
   explicit = null;        # highest priority when non-null
   defaults = { };         # the client repository's declared defaults
-  sources = { };          # the pinned sources, matched by exact name only
+  dependencies = { };     # the tree's dependencies, matched by exact name only
 }
 ```
 
-Priority is explicit argument, then declared default, then the pinned
-source with exactly the declared name. A full miss returns `null`; `resolve`
+Priority is explicit argument, then declared default, then the
+dependency with exactly the declared name. A full miss returns `null`; `resolve`
 can never throw or format an error message, because interpreting a
 miss is deliberately the calling layer's job.
 
-`selectedSourceName` names the pinned source a selection returns:
+`selectedSourceName` names the dependency a selection returns:
 
 ```nix
 core.selectedSourceName {
-  selection = sources: sources.some-pin;   # a function of the sources
-  sources = { some-pin = …; };
+  selection = dependencies: dependencies.some-pin;   # a function of the dependencies
+  dependencies = { some-pin = …; };
 }
 # => "some-pin"
 ```
 
-It applies the selection to a copy of `sources` in which each source
-carries its name, and reads the name from the result. A selection that
-builds its value in another way, such as a directory inside a source,
-gives `null`. The copy forces a source only where the selection reads
-it.
+It applies the selection to a copy of `dependencies` in which each
+dependency carries its name, and reads the name from the result. A
+selection that builds its value in another way, such as a directory
+inside a dependency, gives `null`. The copy forces a dependency only
+where the selection reads it.
 
 ## The library lifecycle
 
@@ -116,14 +116,15 @@ modules over the empty seed, and injects the `caisson-core` namespace
 
 ```nix
 core.mkLib {
-  # The tree's pinned sources, closed over by registered overlays and
-  # modules as `closure-inputs`, and the tree's root (see Sources and
-  # the root). Only `sources` is required.
-  sources = { };
+  # The tree's dependencies, which registered overlays and modules
+  # read from `closure-lib.caisson-core.libManifest.dependencies`, and
+  # the tree's root (see Dependencies and the root). Only
+  # `dependencies` is required.
+  dependencies = { };
   root = null;
-  defaultEcosystemSrc = sources: { some-ecosystem = sources.some-pin; };
+  defaultEcosystemSrc = dependencies: { some-ecosystem = dependencies.some-pin; };
                           # the tree's default source per ecosystem, by
-                          # exact name, selected from `sources`; read back
+                          # exact name, selected from `dependencies`; read back
                           # with `ecosystemSrc`
   modules = lib: { };                 # class-keyed local registrations,
                                       # given the bootstrap lib
@@ -325,7 +326,7 @@ Under `caisson-core`:
 | Manifests | `libManifest`, `pkgsManifest`, `evalManifest`, `manifestOf`, `namePathOf`, `definers` |
 | Configurations | `mkConfiguration`, `finalizeChild`, `finalizeTop`, `elide`, `isManifest` |
 | Deferred configurations | `mkDeferredConfiguration`, `deferChild`, `isDeferred`, `isDeferredConfiguration`, `mkArg`, `isArg` |
-| Sources | `ecosystemSrc` |
+| Ecosystem sources | `ecosystemSrc` |
 | Lists | `lists.unique`, `lists.zipListsWith`, `lists.init`, `lists.last` |
 | Attribute sets | `attrsets.genAttrs`, `attrsets.filterAttrs` |
 | Strings | `strings.hasInfix` |
@@ -356,16 +357,17 @@ the composition it is composed into.
 A registered file takes a closure attribute set as its first argument
 list:
 
-- an overlay file takes
-  `{ closure-inputs, closure-lib, mkLibOverlay, mkModule, ... }`;
-- a module file takes `{ closure-inputs, closure-lib, mkModule, ... }`.
+- a lib overlay file takes
+  `{ closure-lib, mkLibOverlay, mkModule, ... }`;
+- a package overlay file takes `{ closure-lib, mkPkgOverlay, ... }`;
+- a module file takes `{ closure-lib, mkModule, ... }`.
 
-`closure-inputs` is the pinned sources of the composition.
 `closure-lib` is the composed library of the composition that
 registered the file, bound lazily. So the functions of an overlay,
 and a module, reach the registry of that composition under
 `caisson-core.libManifest.modules.<class>` wherever they are later
-composed or evaluated.
+composed or evaluated. The dependencies of the composition are in the
+same manifest, at `closure-lib.caisson-core.libManifest.dependencies`.
 
 ### caisson-core composes itself
 
@@ -380,7 +382,7 @@ keyed `caisson-core/<name>`. So `import caisson-core` and
 `caisson-core` inside a composed library are one definition, and each
 part is a registered entry that a same-key entry replaces.
 
-`coreEntries { sources, defaultEcosystemSrc }` returns those entries for a
+`coreEntries { dependencies, defaultEcosystemSrc }` returns those entries for a
 composition assembled with `compose` directly.
 
 ### Projects
@@ -407,7 +409,7 @@ can keep the entries the composition registered:
 
 The package overlay registry holds package overlays in the shape of a
 lib overlay entry. A file handed to `mkPkgOverlay` takes the closure
-`{ closure-inputs, closure-lib, mkPkgOverlay, ... }` and returns
+`{ closure-lib, mkPkgOverlay, ... }` and returns
 `{ imports ? [ ], overlay }`, where `overlay` is an overlay of a package set (`final: prev:`).
 
 Every registered entry carries:
@@ -439,10 +441,10 @@ The manifest is the self-description of the composition, recorded at
 | --- | --- |
 | `type` | `"lib"` |
 | `name` | the name of the project as declared on `mkLib`; absent when none is declared |
-| `sources` | the pinned sources. The pin files a directory reader read are stated relative to the root when the directory lies in the tree of the root, and `pin.dir` is kept otherwise |
+| `dependencies` | the tree's dependencies. The pin files a directory reader read are stated relative to the root when the directory lies in the tree of the root, and `pin.dir` is kept otherwise |
 | `root` | the tree being built; null for a composition that is not a top |
 | `defaultEcosystemSrc`, `systems` | as declared on `mkLib` |
-| `defaultEcosystemSrcNames` | for each ecosystem `defaultEcosystemSrc` returns a source for, the name of that source in `sources`, or `null` when the selection builds the value in another way (`selectedSourceName`) |
+| `defaultEcosystemSrcNames` | for each ecosystem `defaultEcosystemSrc` returns a source for, the name of that source in `dependencies`, or `null` when the selection builds the value in another way (`selectedSourceName`) |
 | `projects` | the `projects` argument as given |
 | `libOverlays`, `modules`, `pkgOverlays` | the registered dictionaries, with project entries prefixed and local entries winning |
 | `moduleProjects` | where each module came from |
@@ -589,7 +591,7 @@ Each of these manifests carries:
   its integration, a lib excepted;
 - `inputs`, the manifest of the lib, and on the full manifest the
   childless manifest and the children;
-- from the parent: `sources`, `root`, `systems`, `projects`,
+- from the parent: `dependencies`, `root`, `systems`, `projects`,
   `defaultEcosystemSrc`, `pkgSets` and the registries;
 - `defaultPkgs`, where a configuration above recorded one (below).
 
@@ -842,23 +844,23 @@ projections one level down, which is how dictionaries populate across
 flakes. The manifest carries no checks here: producers validate their
 manifests, and consuming integrations type-check on the export side.
 
-## Sources and the root
+## Dependencies and the root
 
-A tree is built from pinned sources. `mkLib` takes them as `sources`,
-an attribute set by name, and takes `root`, the identity of the tree
-being built. caisson-core reads no pin files: how a flake's inputs, a
-`flake.lock` or another pin system's files become `sources` and
-`root` is for a reader written on top of it (the caisson framework
-has readers for flakes, flake-compat and npins).
+A tree is built from its dependencies. `mkLib` takes them as
+`dependencies`, an attribute set by name, and takes `root`, the
+identity of the tree being built. caisson-core reads no pin files: how
+a flake's inputs, a `flake.lock` or another pin system's files become
+`dependencies` and `root` is for a reader written on top of it (the
+caisson framework has readers for flakes, flake-compat and npins).
 
-- A source is a tree with an `outPath`, as its pin system hands it
+- A dependency is a tree with an `outPath`, as its pin system hands it
   over, optionally with `pin`, the record of how it is pinned.
 - When `pin.dir` names the directory that holds the pin files and
   that directory lies inside the root's tree, the manifest records
   the pin files relative to the root.
 - `root` is `{ outPath; dirty; rev; … }`, the source-info fields of
   the tree, or null for a composition that is not a top. Its out path
-  is read only for a source with a `pin.dir`, since inside a flake's
+  is read only for a dependency with a `pin.dir`, since inside a flake's
   `outputs` the out path of `self` cannot be read while the outputs
   are being computed.
 
