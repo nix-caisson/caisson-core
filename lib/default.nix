@@ -217,16 +217,15 @@ let
   ];
 
   # The keyed entries of caisson-core, bound to a composition: the
-  # pinned sources the composition closes over (its `closure-inputs`)
-  # and the default source per ecosystem it declares. Each overlay
-  # file takes the closure
-  # `{ closure-inputs, defaultEcosystemSrc, compose, coreEntries, ... }` and
+  # dependencies of the composition and the default source per
+  # ecosystem it declares. Each overlay file takes the closure
+  # `{ dependencies, defaultEcosystemSrc, compose, coreEntries, ... }` and
   # returns `{ imports ? [ ], overlay }`, the shape mkLibOverlay
   # produces; the closure is applied here by hand, since mkLibOverlay
   # is itself one of the things being composed.
   coreEntries =
     {
-      sources ? { },
+      dependencies ? { },
       # The default source per ecosystem the composition declares.
       defaultEcosystemSrc ? { },
     }:
@@ -237,9 +236,9 @@ let
           key = "caisson-core/${name}";
           file = ../lib-overlays + "/${name}";
           applied = builtins.import file {
-            closure-inputs = sources;
             inherit
               compose
+              dependencies
               coreEntries
               defaultEcosystemSrc
               ;

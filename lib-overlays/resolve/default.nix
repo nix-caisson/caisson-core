@@ -13,7 +13,7 @@
         let
           names = builtins.import ./source-names.nix;
         in
-        { selection, sources }: names.nameOf (selection (names.tagged sources));
+        { selection, dependencies }: names.nameOf (selection (names.tagged dependencies));
     };
   };
 }

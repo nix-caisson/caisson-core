@@ -17,11 +17,11 @@
 #     overlay, the same channel as everything else.
 #
 # This overlay takes the bootstrap closure of caisson-core's
-# entries: the pinned sources this composition closes over, `compose`
-# and `coreEntries`, the function that makes these entries for a
+# entries: the dependencies of this composition, `compose` and
+# `coreEntries`, the function that makes these entries for a
 # composition. It uses builtins only, on purpose.
 {
-  closure-inputs,
+  dependencies,
   compose,
   coreEntries,
   # The default source per ecosystem that the composition these
@@ -44,7 +44,7 @@ let
     builtins.import ../resolve/resolve.nix {
       inherit name;
       defaults = defaultEcosystemSrc;
-      sources = closure-inputs;
+      inherit dependencies;
     };
 
   # Overlay registries. A library and a package set are built the same
@@ -247,13 +247,12 @@ let
 
   # Build a composition-bound mkLibOverlay: everything passed to it
   # takes the closure attrset,
-  # `{ closure-inputs, closure-lib, mkLibOverlay, ... }:`, as its
+  # `{ closure-lib, mkLibOverlay, mkModule, ... }:`, as its
   # first arg list, and returns an `{ imports ? [ ], overlay }`
   # attrset.  Already-built overlays (e.g. another flake's exported
   # libOverlays) are registered directly rather than wrapped.
   mkLibOverlayFor =
     {
-      sources,
       # Extra attrs merged into the closure applied to overlay files;
       # the composed fixpoint (closure-lib, so an overlay's functions
       # reach the registry of the composition that registered them)
@@ -277,17 +276,11 @@ let
             reified = if requiresImport then builtins.import freeformOverlay else freeformOverlay;
             applied =
               if builtins.isFunction reified then
-                reified (
-                  {
-                    closure-inputs = sources;
-                    inherit mkLibOverlay;
-                  }
-                  // extraOverlayClosure
-                )
+                reified ({ inherit mkLibOverlay; } // extraOverlayClosure)
               else
                 builtins.throw ''
                   ${provenance}mkLibOverlay expects a function taking the closure attrset
-                  (`{ closure-inputs, closure-lib, mkLibOverlay, ... }:`) as its first arg
+                  (`{ closure-lib, mkLibOverlay, mkModule, ... }:`) as its first arg
                   list, but got a ${builtins.typeOf reified}. Register already-built overlays
                   directly instead of wrapping them in mkLibOverlay.
                 '';
@@ -314,7 +307,7 @@ let
 
   # Build a composition-bound mkPkgOverlay, the package overlay
   # constructor: everything passed to it takes the closure attrset
-  # `{ closure-inputs, closure-lib, mkPkgOverlay, ... }:` as its first
+  # `{ closure-lib, mkPkgOverlay, ... }:` as its first
   # arg list and returns `{ imports ? [ ], overlay }`, the lib overlay
   # entry's shape, with `overlay = final: prev: ...` an overlay of a
   # package set.
@@ -327,7 +320,6 @@ let
   # flake's exported pkgOverlays) arrive through `projects`.
   mkPkgOverlayFor =
     {
-      sources,
       # The composed fixpoint, bound lazily.
       finalLib,
     }:
@@ -345,14 +337,13 @@ let
           applied =
             if builtins.isFunction reified then
               reified {
-                closure-inputs = sources;
                 closure-lib = finalLib;
                 inherit mkPkgOverlay;
               }
             else
               builtins.throw ''
                 ${provenance}mkPkgOverlay expects a function taking the closure attrset
-                (`{ closure-inputs, closure-lib, mkPkgOverlay, ... }:`) as its first arg
+                (`{ closure-lib, mkPkgOverlay, ... }:`) as its first arg
                 list, but got a ${builtins.typeOf reified}. Register already-built package
                 overlays through `projects` instead of wrapping them in mkPkgOverlay.
               '';
@@ -824,7 +815,7 @@ let
     pkgSets = null;
     projects = null;
     root = null;
-    sources = null;
+    dependencies = null;
     systems = null;
     # By class, the level whose full evaluation the configurations of
     # that class beneath read, as `forChildren.unsafeCrossChildReferences`
@@ -1630,7 +1621,6 @@ let
   # composition (`caisson-core.libManifest.modules.<class>`).
   mkModuleForComposition =
     {
-      sources,
       finalLib,
     }:
     let
@@ -1640,14 +1630,13 @@ let
           mkModule = mkModuleClass moduleClass;
           closureArgs = {
             inherit mkModule;
-            closure-inputs = sources;
             closure-lib = finalLib;
           };
         in
         freeformModule:
         (
           # Everything passed to mkModule takes the closure attrset as its first
-          # arg list: `{ closure-inputs, closure-lib, mkModule, ... }: <module>`.
+          # arg list: `{ closure-lib, mkModule, ... }: <module>`.
           let
             applyClosure =
               m:
@@ -1656,7 +1645,7 @@ let
               else
                 builtins.throw ''
                   mkModule (class `${moduleClass}`) expects a module function taking the
-                  closure attrset (`{ closure-inputs, closure-lib, mkModule, ... }:`) as
+                  closure attrset (`{ closure-lib, mkModule, ... }:`) as
                   its first arg list, but got a ${builtins.typeOf m}.
                 '';
             requiresImport = (builtins.isPath freeformModule) || (builtins.isString freeformModule);
@@ -1681,13 +1670,13 @@ let
   # mkLib and pointing here.
   mkLib =
     {
-      # The tree's pinned sources, by name: each a tree with an
+      # The tree's dependencies, by name: each a tree with an
       # `outPath`, and optionally `pin`, the record of how it is
       # pinned. Reading pin files into this shape is for a reader
       # outside caisson-core. The composition's overlays and modules
-      # close over these as `closure-inputs`; a composition that pins
-      # nothing passes `sources = { };`.
-      sources,
+      # read these from the manifest of `closure-lib`; a composition
+      # with no dependencies passes `dependencies = { };`.
+      dependencies,
       # The identity of the tree being built: an attribute set with
       # `outPath` and the source-info fields of the tree (`rev`,
       # `dirty` and the like); null for a composition that is not a
@@ -1700,8 +1689,8 @@ let
       # The platforms the tree builds on.
       systems ? null,
       # The tree's default source per ecosystem, by exact name: a
-      # function of `sources` returning the source of each ecosystem,
-      # `sources: { nixpkgs-lib = sources.nixpkgs; }`.
+      # function of `dependencies` returning the source of each ecosystem,
+      # `dependencies: { nixpkgs-lib = dependencies.nixpkgs; }`.
       defaultEcosystemSrc ? null,
       # Consumed projects' contributions, by project name.
       projects ? null,
@@ -1742,13 +1731,13 @@ let
     }@resolvedArgs:
     (
       let
-        sources =
-          if builtins.isAttrs resolvedArgs.sources then
-            resolvedArgs.sources
+        dependencies =
+          if builtins.isAttrs resolvedArgs.dependencies then
+            resolvedArgs.dependencies
           else
             builtins.throw ''
-              mkLib expects `sources` to be an attribute set of pinned source trees keyed
-              by name, as a pin reader returns it, but got a ${builtins.typeOf resolvedArgs.sources}.
+              mkLib expects `dependencies` to be an attribute set of pinned trees keyed
+              by name, as a pin reader returns it, but got a ${builtins.typeOf resolvedArgs.dependencies}.
             '';
 
         rawRoot = resolvedArgs.root or null;
@@ -1763,15 +1752,15 @@ let
               ${if builtins.isAttrs rawRoot then "set without outPath" else builtins.typeOf rawRoot}.
             '';
 
-        # The sources as the record keeps them: a directory reader's pin
+        # The dependencies as the record keeps them: a directory reader's pin
         # files are relative to the directory it read (`pin.dir`), and
         # the record states them relative to the root when the directory
         # lies inside the root's tree. A directory outside it, or a
         # composition with no root, keeps `pin.dir`. The root's path is
-        # read only for a source with a `pin.dir`: at a flake top the
+        # read only for a dependency with a `pin.dir`: at a flake top the
         # root's out path is `self.outPath`, which the flake's outputs
         # cannot read while they are being computed.
-        recordedSources =
+        recordedDependencies =
           let
             relativeTo =
               prefix: dir:
@@ -1786,9 +1775,9 @@ let
               else
                 null;
             record =
-              source:
+              dependency:
               let
-                pin = source.pin or null;
+                pin = dependency.pin or null;
                 rel =
                   if pin == null || !(pin ? dir) || root == null then
                     null
@@ -1796,16 +1785,16 @@ let
                     relativeTo (builtins.toString root.outPath) pin.dir;
               in
               if rel == null then
-                source
+                dependency
               else
-                source
+                dependency
                 // {
                   pin = builtins.removeAttrs pin [ "dir" ] // {
                     files = builtins.mapAttrs (_: file: if rel == "" then file else rel + "/" + file) pin.files;
                   };
                 };
           in
-          builtins.mapAttrs (_: record) sources;
+          builtins.mapAttrs (_: record) dependencies;
 
         # An optional argument left out, or passed as null, takes its
         # default.
@@ -2006,13 +1995,13 @@ let
         # manifest for the layered resolution higher layers perform
         # (explicit argument, then these declarations, then the pinned
         # source with exactly the declared name). The declaration is a
-        # selection from the tree's pinned sources, so every source a
+        # selection from the tree's dependencies, so every source a
         # tree uses is one it pins; the manifest holds what it
         # selected, by ecosystem. Nothing here interprets them.
         defaultEcosystemSrc =
           if builtins.isFunction rawEcosystems then
             let
-              selected = rawEcosystems sources;
+              selected = rawEcosystems dependencies;
             in
             if builtins.isAttrs selected then
               selected
@@ -2024,23 +2013,23 @@ let
               ''
           else
             builtins.throw ''
-              mkLib expects `defaultEcosystemSrc` to be a function of `sources`
+              mkLib expects `defaultEcosystemSrc` to be a function of `dependencies`
               returning the source of each ecosystem by its exact name,
-              `sources: { nixpkgs-lib = sources.nixpkgs; }`, but got a
+              `dependencies: { nixpkgs-lib = dependencies.nixpkgs; }`, but got a
               ${builtins.typeOf rawEcosystems}.
             '';
 
         # The name of the pinned source `defaultEcosystemSrc` selects
         # for each ecosystem, or null where it returns a value it built
         # in another way. Each name is read from the selection applied
-        # to the sources tagged with their names (source-names.nix), so
-        # recording the names forces no source the selection does not
+        # to the dependencies tagged with their names (source-names.nix), so
+        # recording the names forces no dependency the selection does not
         # read.
         defaultEcosystemSrcNames =
           let
             names = builtins.import ../resolve/source-names.nix;
           in
-          builtins.mapAttrs (_: names.nameOf) (rawEcosystems (names.tagged sources));
+          builtins.mapAttrs (_: names.nameOf) (rawEcosystems (names.tagged dependencies));
 
         # `modules` and `configs` are functions of the bootstrap lib: the
         # selected entries are in it, the module registrations are not.
@@ -2115,7 +2104,6 @@ let
         # exists: the registered overlay set is what the fixpoint is
         # built from, so it cannot be read back out of it.
         mkLibOverlayHere = mkLibOverlayFor {
-          inherit sources;
           extraOverlayClosure = {
             closure-lib = finalLib;
             mkModule = finalLib.caisson-core.mkModule;
@@ -2124,7 +2112,7 @@ let
 
         # caisson-core's entries, bound to this composition.
         coreOverlays = coreEntries {
-          inherit sources defaultEcosystemSrc;
+          inherit dependencies defaultEcosystemSrc;
         };
 
         # The registry: the forced entries of caisson-core,
@@ -2273,8 +2261,8 @@ let
         # childless and its chain is empty: no parent, no ancestors,
         # nothing consumed and no children; the package configs it
         # declares are inputs of what is built under it, recorded in
-        # `pkgSets`. Every stage shares the declared facts. `sources`
-        # are the pinned sources with each pin recorded against the root,
+        # `pkgSets`. Every stage shares the declared facts. `dependencies`
+        # are the pinned dependencies with each pin recorded against the root,
         # `root` is the tree's identity, and `name` is the declared
         # project name, absent when none is declared. The registries are
         # the registered dictionaries (project entries under
@@ -2294,7 +2282,7 @@ let
             root
             systems
             ;
-          sources = recordedSources;
+          dependencies = recordedDependencies;
           libOverlays = registeredLibOverlays;
           inputs = [ ];
           parent = null;
@@ -2388,11 +2376,11 @@ let
         # as the helpers handed to `libOverlays` and `pkgOverlays` do.
         registrationConstructors = {
           mkModule = mkModuleForComposition {
-            inherit sources finalLib;
+            inherit finalLib;
           };
           mkLibOverlay = mkLibOverlayHere;
           mkPkgOverlay = mkPkgOverlayFor {
-            inherit sources finalLib;
+            inherit finalLib;
           };
         };
 
@@ -2712,7 +2700,7 @@ let
       # forced first. `||` forces the throw-carrying binding only when
       # the argument is malformed.
       builtins.foldl' (acc: check: builtins.seq check acc) finalLib [
-        sources
+        dependencies
         (rawRoot == null || (builtins.isAttrs rawRoot && rawRoot ? outPath) || root)
         (builtins.isFunction rawModules || modules)
         (builtins.isFunction rawConfigs || configs)
@@ -2755,15 +2743,12 @@ in
       mkConfiguration = mkConfigurationFor final;
       finalizeTop = finalizeTopFor final;
       mkPkgOverlay = mkPkgOverlayFor {
-        sources = closure-inputs;
         finalLib = final;
       };
       mkModule = mkModuleForComposition {
-        sources = closure-inputs;
         finalLib = final;
       };
       mkLibOverlay = mkLibOverlayFor {
-        sources = closure-inputs;
         # Lazily bound, so overlay files that do not use them do not
         # force the composed fixpoint through these.
         extraOverlayClosure = {
